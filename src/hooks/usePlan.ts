@@ -27,6 +27,8 @@ function defaultPlan(): PlanData {
     },
     utilitiesBudgets: {},
     utilitiesOrderFromPlan: [],
+    austinWeekly: 0,
+    jennaWeekly: 0,
   };
 }
 
