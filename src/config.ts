@@ -1,4 +1,10 @@
 // src/config.ts
+
+// Optional app key sent as x-app-key header to the API.
+// Set REACT_APP_API_KEY in your .env file to match the server's APP_KEY env var.
+// Leave blank for local dev (server skips auth if APP_KEY is not set).
+export const API_APP_KEY = process.env.REACT_APP_API_KEY || "";
+
 export const CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vSyGwb7qnavzNq9ZqNpiN4D7dByaoPUjTnDHw2qDkdnPcUJ4ug2_aqbPTUNKQQko4Uuu-6JZOCNKCsE/pub?gid=2130685871&single=true&output=csv";
 
