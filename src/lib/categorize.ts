@@ -53,6 +53,7 @@ export function normalizeFixedBucket(rawCat: string): string {
     .trim()
     .toLowerCase();
 
+if (low === "insurance") return "Car Insurance";
   if (low === "interest") return "Ignore";
   if (low === "education") return "Student Loans";
   if (["healthcare/medical", "chiropractors"].includes(low)) return "Medical";
@@ -61,18 +62,18 @@ export function normalizeFixedBucket(rawCat: string): string {
   if (low === "mortgages") return "Mortage";
   if (low === "savings") return "Savings";
 
-  const utilCats = [
-    "utilities",
-    "dues and subscriptions",
-    "telephone services",
-    "cable/satellite services",
-    "taxes",
-    "insurance",
-    "other fixed",
-    "child/dependent expenses",
-    "pets/pet care",
-    "services",
-  ];
+const utilCats = [
+  "utilities",
+  "dues and subscriptions",
+  "telephone services",
+  "cable/satellite services",
+  "taxes",
+  "other fixed",
+  "child/dependent expenses",
+  "pets/pet care",
+  "services",
+];
+
   if (utilCats.includes(low)) return "Utiities";
   if (low.includes("bridge and road fees")) return "Utiities";
   if (low.includes("membership clubs")) return "Utiities";

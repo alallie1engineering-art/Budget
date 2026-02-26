@@ -329,15 +329,22 @@ export default function App() {
     setPwError("");
   }
 
-  const utilitiesLines = useMemo(() => {
-    if (hasPlan && plan.utilitiesOrderFromPlan.length)
-      return plan.utilitiesOrderFromPlan;
-    if (hasPlan) {
-      const keys = Object.keys(plan.utilitiesBudgets || {});
-      if (keys.length) return keys;
-    }
-    return [...UTILITIES_ORDER];
-  }, [hasPlan, plan.utilitiesBudgets, plan.utilitiesOrderFromPlan]);
+const utilitiesLines = useMemo(() => {
+  let lines: string[] = [];
+
+  if (hasPlan && plan.utilitiesOrderFromPlan.length) {
+    lines = plan.utilitiesOrderFromPlan.slice();
+  } else if (hasPlan) {
+    const keys = Object.keys(plan.utilitiesBudgets || {});
+    lines = keys.length ? keys : [...UTILITIES_ORDER];
+  } else {
+    lines = [...UTILITIES_ORDER];
+  }
+
+  if (!lines.includes("Other")) lines.push("Other");
+
+  return lines;
+}, [hasPlan, plan.utilitiesBudgets, plan.utilitiesOrderFromPlan]);
 
   const todayMonth = useMemo(() => {
     const d = new Date();
