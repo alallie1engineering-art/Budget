@@ -8,21 +8,33 @@ export function VarianceBarLive({
   budget: number;
   variance: number;
 }) {
-  const v = Number.isFinite(variance) ? variance : 0;
+  const raw = Number.isFinite(variance) ? variance : 0;
+
+  const b = Math.abs(Number.isFinite(budget) ? budget : 0);
+  const wiggle = Math.max(1, b * 0.01);
+  const withinWiggle = Math.abs(raw) <= wiggle;
+
+  const v = withinWiggle ? 0 : raw;
 
   // variance = budget - actual
   // + under budget -> green LEFT
   // - over budget  -> red RIGHT
-  const scale = Math.max(250, Math.abs(budget || 0), 1);
+  const scale = Math.max(250, b, 1);
   const pct = Math.min(1, Math.abs(v) / scale);
   const widthPct = pct * 50;
 
-  const isUnder = v > 0;
-  const isOver = v < 0;
+  const isUnder = withinWiggle ? true : v > 0;
+  const isOver = withinWiggle ? false : v < 0;
 
   const fill = isOver ? "#F87171" : "#4ADE80";
-  const labelColor =
-    v === 0 ? "var(--warm-gray)" : isOver ? "#991B1B" : "#166534";
+
+  const labelColor = withinWiggle
+    ? "#166534"
+    : v === 0
+    ? "var(--warm-gray)"
+    : isOver
+    ? "#991B1B"
+    : "#166534";
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -36,7 +48,7 @@ export function VarianceBarLive({
           overflow: "hidden",
           minWidth: 140,
         }}
-        title={fmtMoney0(v)}
+        title={fmtMoney0(withinWiggle ? 0 : raw)}
       >
         <div
           style={{
@@ -50,7 +62,7 @@ export function VarianceBarLive({
           }}
         />
 
-        {v !== 0 ? (
+        {!withinWiggle && v !== 0 ? (
           <div
             style={{
               position: "absolute",

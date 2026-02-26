@@ -772,7 +772,11 @@ const utilitiesLines = useMemo(() => {
   const fixedHealthScore = useMemo(() => {
     const withBudget = FIXED_ORDER.filter((n) => ((effectiveFixedBudgets as any)[n] || 0) > 0);
     const onTrack = withBudget.filter(
-      (n) => (fixedSpendByLine[n] || 0) <= ((effectiveFixedBudgets as any)[n] || 0)
+(n) => {
+  const b = ((effectiveFixedBudgets as any)[n] || 0) as number;
+  const wiggle = Math.max(1, Math.abs(b) * 0.01);
+  return (fixedSpendByLine[n] || 0) <= b + wiggle;
+}
     );
     return { linesOnTrack: onTrack.length, total: withBudget.length };
   }, [effectiveFixedBudgets, fixedSpendByLine]);
