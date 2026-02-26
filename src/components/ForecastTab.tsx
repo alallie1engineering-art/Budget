@@ -267,9 +267,10 @@ function setStartHys(v: number) {
       endHys: number;
     }> = [];
 
-    for (let i = 0; i < monthsAhead; i++) {
-      const m0 = addMonths(baseMonth, i);
-      const mk = monthKey(m0);
+for (let i = 0; i < monthsAhead; i += 1) {
+  const m0 = addMonths(baseMonth, i + 1);
+  const mk = monthKey(m0);
+
 
       const inputs = state.perMonth[mk] || {
         addFixed: 0,
