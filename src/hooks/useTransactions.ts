@@ -1,7 +1,7 @@
 // src/hooks/useTransactions.ts
 import { useEffect, useMemo, useState } from "react";
 import { parseCsv, parseAmount, parseDate, pick } from "../csv";
-import { CSV_URL } from "../config";
+import { API_APP_KEY } from "../config";
 import { TxRow } from "../types";
 import { dayKey, monthKey } from "../lib/dates";
 import { isTruthy, safeLower, safeTrim } from "../lib/text";
@@ -25,10 +25,24 @@ export function useTransactions() {
       setErr("");
 
       try {
-        const res = await fetch(CSV_URL, { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const text = await res.text();
-        const { rows } = parseCsv(text);
+const res = await fetch("/api/transactions", {
+  cache: "no-store",
+  headers: API_APP_KEY ? { "x-app-key": API_APP_KEY } : undefined,
+});
+
+if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+const json = await res.json();
+if (json?.error) throw new Error(json.error);
+
+const headers: string[] = json.headers || [];
+const rawRows: any[] = json.rows || [];
+
+const rows = rawRows.map((r: any[]) => {
+  const obj: any = {};
+  for (let i = 0; i < headers.length; i += 1) obj[headers[i]] = r[i];
+  return obj;
+});
 
         const mapped = rows
           .map((r: any) => {
