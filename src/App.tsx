@@ -825,6 +825,18 @@ export default function App() {
     return (plan.hysBalance || 0) + (projectedSavings || 0);
   }, [isCurrentMonth, plan.hysBalance, projectedSavings]);
 
+  const startOverflowBalance = plan.overflowBalance || 0;
+  const startHysBalance = plan.hysBalance || 0;
+
+  const endOverflowBalance = projectedEndOverflowBalance ?? startOverflowBalance;
+  const endHysBalance = projectedEndHysBalance ?? startHysBalance;
+
+  const overflowBalDelta = endOverflowBalance - startOverflowBalance;
+  const hysBalDelta = endHysBalance - startHysBalance;
+
+  const showProjectedEndBalances =
+    isCurrentMonth && projectedEndOverflowBalance != null && projectedEndHysBalance != null;
+
   const planMismatch =
     plan.planMonthDate && selectedMonth ? !isSameMonth(plan.planMonthDate, selectedMonth) : false;
 
@@ -1126,13 +1138,15 @@ export default function App() {
       ) : null}
 
       {tab === "forecast" ? (
-        <ForecastTab
-          selectedMonth={selectedMonth}
-          baseFixed={budgetFixed}
-          baseDiscControlled={controlledBudget}
-          austinWeekly={plan.austinWeekly || 0}
-          jennaWeekly={plan.jennaWeekly || 0}
-        />
+    <ForecastTab
+  selectedMonth={selectedMonth}
+  baseFixed={budgetFixed}
+  baseDiscControlled={controlledBudget}
+  austinWeekly={plan.austinWeekly || 0}
+  jennaWeekly={plan.jennaWeekly || 0}
+  autoStartOverflow={projectedEndOverflowBalance}
+  autoStartHys={projectedEndHysBalance}
+/>
       ) : null}
 
       {tab === "budget_overview" ? (
@@ -1144,6 +1158,69 @@ export default function App() {
             </div>
           ) : (
             <>
+                            <div style={{ padding: "12px 20px 0" }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                    gap: 12,
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "white",
+                      border: "1px solid var(--border)",
+                      borderRadius: 14,
+                      padding: "14px 16px",
+                    }}
+                  >
+                    <div style={{ fontSize: 11, color: "var(--warm-gray)", fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase" }}>
+                      Overflow balance
+                    </div>
+                    <div style={{ fontFamily: "DM Serif Display, serif", fontSize: 30, lineHeight: 1.1, marginTop: 6 }}>
+                      {fmtMoney0(startOverflowBalance)}
+                    </div>
+
+                    {showProjectedEndBalances ? (
+                      <div style={{ marginTop: 10, fontSize: 12, color: "var(--warm-gray)", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                        <div>
+                          End of month: <span style={{ color: "var(--ink)", fontWeight: 800 }}>{fmtMoney0(endOverflowBalance)}</span>
+                        </div>
+                        <div style={{ color: overflowBalDelta >= 0 ? "#166534" : "#991B1B", fontWeight: 900 }}>
+                          Change: {fmtMoney0(overflowBalDelta)}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div
+                    style={{
+                      background: "white",
+                      border: "1px solid var(--border)",
+                      borderRadius: 14,
+                      padding: "14px 16px",
+                    }}
+                  >
+                    <div style={{ fontSize: 11, color: "var(--warm-gray)", fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase" }}>
+                      HYS balance
+                    </div>
+                    <div style={{ fontFamily: "DM Serif Display, serif", fontSize: 30, lineHeight: 1.1, marginTop: 6 }}>
+                      {fmtMoney0(startHysBalance)}
+                    </div>
+
+                    {showProjectedEndBalances ? (
+                      <div style={{ marginTop: 10, fontSize: 12, color: "var(--warm-gray)", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                        <div>
+                          End of month: <span style={{ color: "var(--ink)", fontWeight: 800 }}>{fmtMoney0(endHysBalance)}</span>
+                        </div>
+                        <div style={{ color: hysBalDelta >= 0 ? "#166534" : "#991B1B", fontWeight: 900 }}>
+                          Change: {fmtMoney0(hysBalDelta)}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
               <div style={{ padding: "20px 20px 0" }}>
                 <HeroBreakdownBar
                   income={isCurrentMonth ? projectedIncome : actualIncome}

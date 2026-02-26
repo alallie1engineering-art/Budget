@@ -1,5 +1,5 @@
 // src/components/ForecastTab.tsx
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { fmtMoney0 } from "../lib/format";
 import { isSameMonth, monthKey, monthLabel } from "../lib/dates";
 
@@ -19,6 +19,9 @@ type Props = {
 
   austinWeekly: number;
   jennaWeekly: number;
+
+    autoStartOverflow?: number | null;
+  autoStartHys?: number | null;
 };
 
 const STORAGE_KEY = "forecast_inputs_v2";
@@ -132,23 +135,75 @@ export default function ForecastTab(props: Props) {
       : monthStart(new Date());
     return d;
   }, [props.selectedMonth]);
+  const baseIsCurrentMonth = useMemo(() => {
+    return isSameMonth(baseMonth, new Date());
+  }, [baseMonth]);
 
+  const autoStart = useMemo(() => {
+    const o = props.autoStartOverflow;
+    const h = props.autoStartHys;
+
+    const has = Number.isFinite(o as number) && Number.isFinite(h as number);
+
+    return {
+      has,
+      overflow: clampFinite(Number(o ?? 0)),
+      hys: clampFinite(Number(h ?? 0)),
+    };
+  }, [props.autoStartOverflow, props.autoStartHys]);
+
+  useEffect(() => {
+    if (!baseIsCurrentMonth) return;
+    if (!autoStart.has) return;
+
+    if (state.startOverflow !== 0 || state.startHys !== 0) return;
+
+    const next = {
+      ...state,
+      startOverflow: autoStart.overflow,
+      startHys: autoStart.hys,
+    };
+
+    setState(next);
+    saveState(next);
+  }, [
+    baseIsCurrentMonth,
+    autoStart.has,
+    autoStart.overflow,
+    autoStart.hys,
+    state.startOverflow,
+    state.startHys,
+  ]);
+
+  function applyAutoStart() {
+    if (!autoStart.has) return;
+
+    const next = {
+      ...state,
+      startOverflow: autoStart.overflow,
+      startHys: autoStart.hys,
+    };
+
+    setState(next);
+    saveState(next);
+  }
   function setMonthsAhead(n: number) {
     const next = { ...state, monthsAhead: n };
     setState(next);
     saveState(next);
   }
 
-  function setStartOverflow(v: number) {
-    const next = { ...state, startOverflow: v };
-    setState(next);
-    saveState(next);
-  }
+function setStartOverflow(v: number) {
+  const next = { ...state, startOverflow: Math.round(clampFinite(v)) };
+  setState(next);
+  saveState(next);
+}
 
-  function setStartHys(v: number) {
-    const next = { ...state, startHys: v };
-    setState(next);
-    saveState(next);
+function setStartHys(v: number) {
+  const next = { ...state, startHys: Math.round(clampFinite(v)) };
+  setState(next);
+  saveState(next);
+
   }
 
   function setMonthField(
@@ -338,7 +393,7 @@ export default function ForecastTab(props: Props) {
                 Start overflow balance
               </div>
               <input
-                value={String(state.startOverflow)}
+                value={fmtMoney0(state.startOverflow)}
                 onChange={(e) =>
                   setStartOverflow(parseMoneyInput(e.target.value))
                 }
@@ -368,7 +423,7 @@ export default function ForecastTab(props: Props) {
                 Start HYS balance
               </div>
               <input
-                value={String(state.startHys)}
+                value={fmtMoney0(state.startHys)}
                 onChange={(e) => setStartHys(parseMoneyInput(e.target.value))}
                 style={{
                   width: "100%",
