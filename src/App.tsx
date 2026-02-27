@@ -801,7 +801,9 @@ const utilitiesLines = useMemo(() => {
   const actualIncome = overviewMonth.income;
   const actualSavings = savingsTransferActual;
 
-  const budgetIncome = isCurrentMonth ? plan.incomeProjection || 0 : plan.incomeBudgetBase || 0;
+const budgetIncome = isCurrentMonth
+  ? (actualIncome || 0) + (plan.incomeProjection || 0)
+  : plan.incomeBudgetBase || 0;
 
   const budgetFixed = useMemo(() => {
     return FIXED_ORDER.reduce((a, n) => a + ((effectiveFixedBudgets as any)[n] || 0), 0);
