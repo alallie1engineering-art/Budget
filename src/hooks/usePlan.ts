@@ -25,7 +25,10 @@ function defaultPlan(): PlanData {
     utilitiesBudgets: {},
     utilitiesOrderFromPlan: [],
     austinWeekly: 0,
-    jennaWeekly: 0
+    jennaWeekly: 0,
+    addIncCount: 0,
+    austinPayCount: 0,
+    jennaPayCount: 0
   };
 }
 
@@ -46,6 +49,7 @@ function rowsToCsv(headers: string[], rows: any[][]): string {
 
 export function usePlan() {
   const [plan, setPlan] = useState<PlanData>(() => defaultPlan());
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -90,12 +94,16 @@ export function usePlan() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [refreshKey]);
 
   const hasPlan = useMemo(() => {
     const p = plan ?? defaultPlan();
     return !!p.loaded && !p.error;
   }, [plan]);
 
-  return { plan: plan ?? defaultPlan(), setPlan, hasPlan };
+  function refreshPlan() {
+    setRefreshKey((k) => k + 1);
+  }
+
+  return { plan: plan ?? defaultPlan(), setPlan, hasPlan, refreshPlan };
 }

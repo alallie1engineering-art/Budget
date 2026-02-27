@@ -1,5 +1,5 @@
 // src/App.tsx
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   BUDGETS,
   BUCKETS,
@@ -301,7 +301,7 @@ const {
   monthTx
 } = useTransactions()
 
-const { plan, hasPlan } = usePlan()
+const { plan, hasPlan, refreshPlan } = usePlan()
 
 const [filter, setFilter] = useState<string>("all")
 const [showCount, setShowCount] = useState<number>(20)
@@ -317,6 +317,18 @@ const [planOverrides, setPlanOverrides] = useState({
 })
 const [savingPlanOverrides, setSavingPlanOverrides] = useState(false)
 const [planOverridesMsg, setPlanOverridesMsg] = useState("")
+
+// Sync inputs from sheet values whenever plan loads or refreshes
+useEffect(() => {
+  if (!hasPlan) return
+  setPlanOverrides({
+    addInc: plan.addIncCount ? String(plan.addIncCount) : "",
+    addFix: plan.addFix ? String(plan.addFix) : "",
+    austinPay: plan.austinPayCount ? String(plan.austinPayCount) : "",
+    jennaPay: plan.jennaPayCount ? String(plan.jennaPayCount) : "",
+    descrAdd: plan.addDesc ? String(plan.addDesc) : ""
+  })
+}, [hasPlan, plan])
 
 async function savePlanOverrides() {
   setSavingPlanOverrides(true)
@@ -337,7 +349,11 @@ async function savePlanOverrides() {
       throw new Error(`HTTP ${r.status} ${t}`)
     }
 
-    setPlanOverridesMsg("Saved")
+    setPlanOverridesMsg("Saving\u2026 refreshing data")
+    // Allow sheet to propagate, then refresh plan data
+    await new Promise((res) => setTimeout(res, 1200))
+    refreshPlan()
+    setPlanOverridesMsg("Saved \u2014 data refreshed")
   } catch (e: any) {
     setPlanOverridesMsg(e?.message || "Save failed")
   } finally {

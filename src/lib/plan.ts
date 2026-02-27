@@ -31,6 +31,11 @@ export type PlanData = {
   // Weekly net income values derived from the Income section in the Plan CSV
   austinWeekly: number;
   jennaWeekly: number;
+
+  // Pay count values (cell to the left of the label in the sheet, e.g. H2, H4/H5)
+  addIncCount: number;
+  austinPayCount: number;
+  jennaPayCount: number;
 };
 
 function asNum(v: any) {
@@ -120,6 +125,34 @@ function findLabelNext(grid: string[][], label: string) {
   return found;
 }
 
+// Like findLabelNext but stops at the FIRST match found (avoids duplicate labels)
+function findLabelNextFirst(grid: string[][], label: string) {
+  const target = safeLower(label);
+  for (const row of grid) {
+    for (let c = 0; c < row.length - 1; c++) {
+      if (safeLower(row[c]) === target) {
+        const next = safeTrim(row[c + 1]);
+        if (next !== "") return next;
+      }
+    }
+  }
+  return "";
+}
+
+function findLabelPrev(grid: string[][], label: string) {
+  const target = safeLower(label);
+  let found = "";
+  for (const row of grid) {
+    for (let c = 1; c < row.length; c++) {
+      if (safeLower(row[c]) === target) {
+        const prev = safeTrim(row[c - 1]);
+        if (prev !== "") found = prev;
+      }
+    }
+  }
+  return found;
+}
+
 /*
   Your Income section now uses labels:
   "Austin Income" and "Jenna Income"
@@ -170,6 +203,9 @@ export function emptyPlan(): PlanData {
     utilitiesOrderFromPlan: [],
     austinWeekly: 0,
     jennaWeekly: 0,
+    addIncCount: 0,
+    austinPayCount: 0,
+    jennaPayCount: 0,
   };
 }
 export function parsePlanFromCsvText(csvText: string): PlanData {
@@ -187,9 +223,9 @@ export function parsePlanFromCsvText(csvText: string): PlanData {
   out.hysBalance = asNum(get("HYS Account Savings") || get("HYS Amount"));
   out.overflowBalance = asNum(get("Overflow") || get("Overflow Amount"));
 
-  // Adds
-  out.addFix = asNum(get("Add. Fix"));
-  out.addDesc = asNum(get("Descr Add"));
+  // Adds — use first match to avoid duplicate label collisions
+  out.addFix = asNum(findLabelNextFirst(grid, "Add. Fix"));
+  out.addDesc = asNum(findLabelNextFirst(grid, "Descr Add"));
 
   // This is your Add Income cell in the PLAN tab
   // We store it in incomeProjection
@@ -206,6 +242,11 @@ export function parsePlanFromCsvText(csvText: string): PlanData {
   // These are optional for display, they do not drive the new income math we are about to change
   out.austinWeekly = findWeeklyFromMonthlyLabel(grid, "Austin Income");
   out.jennaWeekly = findWeeklyFromMonthlyLabel(grid, "Jenna Income");
+
+  // Pay counts read from first match of their labels in column G -> H
+  out.addIncCount = asNum(findLabelNextFirst(grid, "Add. Inc"));
+  out.austinPayCount = asNum(findLabelNextFirst(grid, "Austin Pay"));
+  out.jennaPayCount = asNum(findLabelNextFirst(grid, "Jenna Pay"));
 
   // Budgets are in column A and B in your new layout
   for (const row of grid) {
