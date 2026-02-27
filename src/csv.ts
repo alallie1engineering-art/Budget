@@ -81,7 +81,22 @@ export function parseAmount(str: string) {
 
 export function parseDate(str: string) {
   if (!str) return null;
-  const d = new Date(str);
+
+  const s = String(str).trim();
+
+  // If Google Sheets gives a date serial like 45360
+  // Sheets uses the same base as Excel, 1899 12 30
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Number(s);
+    if (Number.isFinite(n) && n > 20000) {
+      const ms = Math.round(n * 86400000);
+      const base = Date.UTC(1899, 11, 30);
+      const d = new Date(base + ms);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+  }
+
+  const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d;
 }
 

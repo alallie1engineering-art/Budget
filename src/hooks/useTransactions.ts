@@ -43,7 +43,8 @@ const rows = rawRows.map((r: any[]) => {
   for (let i = 0; i < headers.length; i += 1) obj[headers[i]] = r[i];
   return obj;
 });
-
+console.log("TX headers", headers);
+console.log("TX first row", rawRows?.[0]);
         const mapped = rows
           .map((r: any) => {
             const date = parseDate(pick(r, ["Date"]));
