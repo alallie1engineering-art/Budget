@@ -1,6 +1,7 @@
-import fs from "fs";
-import path from "path";
-import { google } from "googleapis";
+// api/plan.js
+const fs = require("fs");
+const path = require("path");
+const { google } = require("googleapis");
 
 function forceLoadEnvLocal() {
   try {
@@ -71,7 +72,7 @@ function getDebugFlag(req) {
   }
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   try {
     const debug = getDebugFlag(req);
 
@@ -96,7 +97,7 @@ export default async function handler(req, res) {
 
     const range = `${sheetName}!A:Z`;
     const resp = await sheets.spreadsheets.values.get({ spreadsheetId, range });
-    const values = resp.data.values || [];
+    const values = (resp && resp.data && resp.data.values) || [];
 
     if (values.length < 2) return sendJson(res, 200, { headers: [], rows: [] });
 
@@ -105,6 +106,6 @@ export default async function handler(req, res) {
 
     return sendJson(res, 200, { headers, rows });
   } catch (err) {
-    return sendJson(res, 500, { error: String(err?.message || err) });
+    return sendJson(res, 500, { error: String((err && err.message) || err) });
   }
-}
+};
