@@ -229,6 +229,7 @@ function HeroBreakdownBar({
         </div>
       </div>
 
+
       <div
         style={{
           height: 22,
