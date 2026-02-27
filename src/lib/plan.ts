@@ -172,36 +172,45 @@ export function emptyPlan(): PlanData {
     jennaWeekly: 0,
   };
 }
-
 export function parsePlanFromCsvText(csvText: string): PlanData {
   const grid = parseCsvToGrid(csvText);
   const out = emptyPlan();
   out.loaded = true;
 
-  out.planMonthRaw = safeTrim(findLabelNext(grid, "MONTH"));
+  const get = (label: string) => safeTrim(findLabelNext(grid, label));
+
+  out.planMonthRaw = get("MONTH");
   out.planMonthDate = parsePlanMonthValue(out.planMonthRaw);
 
-  out.overflowBalance = asNum(findLabelNext(grid, "Overflow Amount"));
-  out.hysBalance = asNum(findLabelNext(grid, "HYS Amount"));
+  // Starting balances from bottom section
+  // Your sheet uses labels like "HYS Account Savings" and "Overflow"
+  out.hysBalance = asNum(get("HYS Account Savings") || get("HYS Amount"));
+  out.overflowBalance = asNum(get("Overflow") || get("Overflow Amount"));
 
-  out.addFix = asNum(findLabelNext(grid, "Add. Fix"));
-  out.addDesc = asNum(findLabelNext(grid, "Descr Add"));
+  // Adds
+  out.addFix = asNum(get("Add. Fix"));
+  out.addDesc = asNum(get("Descr Add"));
 
-  out.incomeProjection = asNum(findLabelNext(grid, "Income"));
+  // This is your Add Income cell in the PLAN tab
+  // We store it in incomeProjection
+  out.incomeProjection = asNum(get("Add Income"));
 
-  // Column C row 6 for past months baseline income budget
-  out.incomeBudgetBase = asNum(grid[5]?.[2] ?? "");
+  // Past month baseline fallback
+  // Try the Income section Total first, then fall back to old cell logic
+  out.incomeBudgetBase = asNum(get("Total")) || asNum(grid[5]?.[2] ?? "");
 
-  out.plannedHysTransfer = asNum(findLabelNext(grid, "HYS"));
+  // Planned transfer amount
+  out.plannedHysTransfer = asNum(get("HYS"));
 
   // Weekly net incomes derived from your monthly average cells
+  // These are optional for display, they do not drive the new income math we are about to change
   out.austinWeekly = findWeeklyFromMonthlyLabel(grid, "Austin Income");
   out.jennaWeekly = findWeeklyFromMonthlyLabel(grid, "Jenna Income");
 
-  // Main budget labels in column B and values in column C
+  // Budgets are in column A and B in your new layout
   for (const row of grid) {
-    const label = safeTrim(row[1]);
-    const val = row[2];
+    const label = safeTrim(row[0]);
+    const val = row[1];
 
     if (
       [
@@ -224,14 +233,17 @@ export function parsePlanFromCsvText(csvText: string): PlanData {
       out.discretionaryBudgets["General Merchandise"] = asNum(val);
   }
 
-  // Full Utilities is in columns L and M (0 based 11 and 12)
-  const NAME_COL = 11;
-  const AMT_COL = 12;
+  // Full Utilities in columns D and E in your new layout
+  const NAME_COL = 3;
+  const AMT_COL = 4;
 
   let utilStart = -1;
   for (let r = 0; r < grid.length; r++) {
     if (safeLower(grid[r][NAME_COL]) === "full utilities") utilStart = r + 1;
   }
+
+  out.utilitiesBudgets = {};
+  out.utilitiesOrderFromPlan = [];
 
   if (utilStart >= 0) {
     const seen = new Set<string>();
