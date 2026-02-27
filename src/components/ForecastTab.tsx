@@ -10,6 +10,16 @@ type MonthInputs = {
   hysTransfer: number;
 };
 
+type PersistedState = {
+  perMonth: Record<string, MonthInputs>;
+  startOverflow: number;
+  startHys: number;
+  monthsAhead: number;
+  startUserOverride: boolean;
+  lastAutoOverflow: number;
+  lastAutoHys: number;
+};
+
 type Props = {
   selectedMonth: Date | null;
   onSelectMonth?: (m: Date) => void;
@@ -20,13 +30,13 @@ type Props = {
   austinWeekly: number;
   jennaWeekly: number;
 
-    autoStartOverflow?: number | null;
+  autoStartOverflow?: number | null;
   autoStartHys?: number | null;
 };
 
 const STORAGE_KEY = "forecast_inputs_v2";
 
-const JENNA_ANCHOR_PAY_DATE = new Date(2026, 1, 25); // Wed 2/25/2026
+const JENNA_ANCHOR_PAY_DATE = new Date(2026, 1, 25);
 
 function clampFinite(n: number) {
   return Number.isFinite(n) ? n : 0;
@@ -59,45 +69,65 @@ function parseMoneyInput(v: string) {
   return neg ? -num : num;
 }
 
-function safeLoadState(): {
-  perMonth: Record<string, MonthInputs>;
-  startOverflow: number;
-  startHys: number;
-  monthsAhead: number;
-} {
+function defaultState(): PersistedState {
+  return {
+    perMonth: {},
+    startOverflow: 0,
+    startHys: 0,
+    monthsAhead: 12,
+    startUserOverride: false,
+    lastAutoOverflow: 0,
+    lastAutoHys: 0
+  };
+}
+
+function safeLoadState(): PersistedState {
+  const fallback = defaultState();
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return { perMonth: {}, startOverflow: 0, startHys: 0, monthsAhead: 12 };
-    }
+    if (!raw) return fallback;
+
     const parsed = JSON.parse(raw);
+
     const perMonth = (parsed?.perMonth || {}) as Record<string, MonthInputs>;
     const startOverflow = clampFinite(Number(parsed?.startOverflow ?? 0));
     const startHys = clampFinite(Number(parsed?.startHys ?? 0));
-    const monthsAhead = clampFinite(Number(parsed?.monthsAhead ?? 12)) || 12;
+
+    const monthsAheadRaw = clampFinite(Number(parsed?.monthsAhead ?? 12));
+    const monthsAhead = Math.max(3, Math.min(36, Math.floor(monthsAheadRaw || 12)));
+
+    const startUserOverride = Boolean(parsed?.startUserOverride ?? false);
+    const lastAutoOverflow = clampFinite(Number(parsed?.lastAutoOverflow ?? 0));
+    const lastAutoHys = clampFinite(Number(parsed?.lastAutoHys ?? 0));
 
     return {
       perMonth,
       startOverflow,
       startHys,
-      monthsAhead: Math.max(3, Math.min(36, Math.floor(monthsAhead))),
+      monthsAhead,
+      startUserOverride,
+      lastAutoOverflow,
+      lastAutoHys
     };
   } catch {
-    return { perMonth: {}, startOverflow: 0, startHys: 0, monthsAhead: 12 };
+    return fallback;
   }
 }
+
+
 
 function saveState(next: {
   perMonth: Record<string, MonthInputs>;
   startOverflow: number;
   startHys: number;
   monthsAhead: number;
+  startUserOverride: boolean;
+  lastAutoOverflow: number;
+  lastAutoHys: number;
 }) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 function countWeekdayInMonth(m0: Date, weekday: number) {
@@ -127,14 +157,13 @@ function countJennaPaychecksInMonth(m0: Date) {
 }
 
 export default function ForecastTab(props: Props) {
-  const [state, setState] = useState(() => safeLoadState());
+  const [state, setState] = useState<PersistedState>(() => safeLoadState());
 
   const baseMonth = useMemo(() => {
-    const d = props.selectedMonth
-      ? monthStart(props.selectedMonth)
-      : monthStart(new Date());
+    const d = props.selectedMonth ? monthStart(props.selectedMonth) : monthStart(new Date());
     return d;
   }, [props.selectedMonth]);
+
   const baseIsCurrentMonth = useMemo(() => {
     return isSameMonth(baseMonth, new Date());
   }, [baseMonth]);
@@ -148,7 +177,7 @@ export default function ForecastTab(props: Props) {
     return {
       has,
       overflow: clampFinite(Number(o ?? 0)),
-      hys: clampFinite(Number(h ?? 0)),
+      hys: clampFinite(Number(h ?? 0))
     };
   }, [props.autoStartOverflow, props.autoStartHys]);
 
@@ -156,12 +185,19 @@ export default function ForecastTab(props: Props) {
     if (!baseIsCurrentMonth) return;
     if (!autoStart.has) return;
 
-    if (state.startOverflow !== 0 || state.startHys !== 0) return;
+    if (state.startUserOverride) return;
 
-    const next = {
+    const alreadyApplied =
+      state.lastAutoOverflow === autoStart.overflow && state.lastAutoHys === autoStart.hys;
+
+    if (alreadyApplied) return;
+
+    const next: PersistedState = {
       ...state,
       startOverflow: autoStart.overflow,
       startHys: autoStart.hys,
+      lastAutoOverflow: autoStart.overflow,
+      lastAutoHys: autoStart.hys
     };
 
     setState(next);
@@ -171,54 +207,68 @@ export default function ForecastTab(props: Props) {
     autoStart.has,
     autoStart.overflow,
     autoStart.hys,
-    state.startOverflow,
-    state.startHys,
+    state.startUserOverride,
+    state.lastAutoOverflow,
+    state.lastAutoHys,
+    state
   ]);
 
   function applyAutoStart() {
     if (!autoStart.has) return;
 
-    const next = {
+    const next: PersistedState = {
       ...state,
       startOverflow: autoStart.overflow,
       startHys: autoStart.hys,
+      startUserOverride: false,
+      lastAutoOverflow: autoStart.overflow,
+      lastAutoHys: autoStart.hys
     };
 
     setState(next);
     saveState(next);
   }
+
   function setMonthsAhead(n: number) {
-    const next = { ...state, monthsAhead: n };
+    const next: PersistedState = {
+      ...state,
+      monthsAhead: Math.max(3, Math.min(36, Math.floor(clampFinite(n) || 12)))
+    };
     setState(next);
     saveState(next);
   }
 
-function setStartOverflow(v: number) {
-  const next = { ...state, startOverflow: Math.round(clampFinite(v)) };
-  setState(next);
-  saveState(next);
-}
-
-function setStartHys(v: number) {
-  const next = { ...state, startHys: Math.round(clampFinite(v)) };
-  setState(next);
-  saveState(next);
-
+  function setStartOverflow(v: number) {
+    const next: PersistedState = {
+      ...state,
+      startOverflow: Math.round(clampFinite(v)),
+      startUserOverride: true
+    };
+    setState(next);
+    saveState(next);
   }
 
-  function setMonthField(
-    mKey: string,
-    field: keyof MonthInputs,
-    value: number
-  ) {
-    const cur = state.perMonth[mKey] || {
+  function setStartHys(v: number) {
+    const next: PersistedState = {
+      ...state,
+      startHys: Math.round(clampFinite(v)),
+      startUserOverride: true
+    };
+    setState(next);
+    saveState(next);
+  }
+
+  function setMonthField(mKey: string, field: keyof MonthInputs, value: number) {
+    const cur: MonthInputs = state.perMonth[mKey] || {
       addFixed: 0,
       addDisc: 0,
       otherSpend: 0,
-      hysTransfer: 0,
+      hysTransfer: 0
     };
+
     const perMonth = { ...state.perMonth, [mKey]: { ...cur, [field]: value } };
-    const next = { ...state, perMonth };
+    const next: PersistedState = { ...state, perMonth };
+
     setState(next);
     saveState(next);
   }
@@ -267,16 +317,15 @@ function setStartHys(v: number) {
       endHys: number;
     }> = [];
 
-for (let i = 0; i < monthsAhead; i += 1) {
-  const m0 = addMonths(baseMonth, i + 1);
-  const mk = monthKey(m0);
-
+    for (let i = 0; i < monthsAhead; i += 1) {
+      const m0 = addMonths(baseMonth, i + 1);
+      const mk = monthKey(m0);
 
       const inputs = state.perMonth[mk] || {
         addFixed: 0,
         addDisc: 0,
         otherSpend: 0,
-        hysTransfer: 0,
+        hysTransfer: 0
       };
 
       const incomeAustin = austinPayPerMonth(m0);
@@ -294,8 +343,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
       const otherSpend = clampFinite(inputs.otherSpend);
       const hysTransfer = clampFinite(inputs.hysTransfer);
 
-      const monthOverflow =
-        incomeTotal - fixedTotal - discTotal - otherSpend - hysTransfer;
+      const monthOverflow = incomeTotal - fixedTotal - discTotal - otherSpend - hysTransfer;
 
       runningOverflow += monthOverflow;
       runningHys += hysTransfer;
@@ -316,7 +364,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
         hysTransfer,
         monthOverflow,
         endOverflow: runningOverflow,
-        endHys: runningHys,
+        endHys: runningHys
       });
     }
 
@@ -330,8 +378,16 @@ for (let i = 0; i < monthsAhead; i += 1) {
     state.monthsAhead,
     state.perMonth,
     state.startHys,
-    state.startOverflow,
+    state.startOverflow
   ]);
+
+  const showAutoStartButton = useMemo(() => {
+    if (!autoStart.has) return false;
+    const diff =
+      Math.round(clampFinite(state.startOverflow)) !== Math.round(autoStart.overflow) ||
+      Math.round(clampFinite(state.startHys)) !== Math.round(autoStart.hys);
+    return diff;
+  }, [autoStart.has, autoStart.overflow, autoStart.hys, state.startOverflow, state.startHys]);
 
   return (
     <main>
@@ -341,7 +397,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
           gap: 12,
           flexWrap: "wrap",
           alignItems: "stretch",
-          marginBottom: 14,
+          marginBottom: 14
         }}
       >
         <div
@@ -350,14 +406,14 @@ for (let i = 0; i < monthsAhead; i += 1) {
             background: "white",
             border: "1px solid var(--border)",
             borderRadius: 14,
-            padding: "14px 16px",
+            padding: "14px 16px"
           }}
         >
           <div
             style={{
               fontFamily: "DM Serif Display, serif",
               fontSize: 22,
-              marginBottom: 6,
+              marginBottom: 6
             }}
           >
             Forecast
@@ -366,11 +422,11 @@ for (let i = 0; i < monthsAhead; i += 1) {
             style={{
               fontSize: 12,
               color: "var(--warm-gray)",
-              lineHeight: 1.35,
+              lineHeight: 1.35
             }}
           >
-            Austin income counts Thursdays in the month. Jenna income counts
-            biweekly paychecks anchored to 2/25/2026.
+            Austin income counts Thursdays in the month. Jenna income counts biweekly paychecks
+            anchored to 2/25/2026.
           </div>
 
           <div
@@ -378,7 +434,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
               display: "flex",
               gap: 10,
               flexWrap: "wrap",
-              marginTop: 12,
+              marginTop: 12
             }}
           >
             <div style={{ flex: "1 1 160px" }}>
@@ -388,16 +444,14 @@ for (let i = 0; i < monthsAhead; i += 1) {
                   color: "var(--warm-gray)",
                   fontWeight: 700,
                   letterSpacing: 0.8,
-                  textTransform: "uppercase",
+                  textTransform: "uppercase"
                 }}
               >
                 Start overflow balance
               </div>
               <input
                 value={fmtMoney0(state.startOverflow)}
-                onChange={(e) =>
-                  setStartOverflow(parseMoneyInput(e.target.value))
-                }
+                onChange={(e) => setStartOverflow(parseMoneyInput(e.target.value))}
                 style={{
                   width: "100%",
                   marginTop: 6,
@@ -406,7 +460,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
                   border: "1px solid var(--border)",
                   background: "var(--cream)",
                   fontSize: 13,
-                  fontFamily: "inherit",
+                  fontFamily: "inherit"
                 }}
               />
             </div>
@@ -418,7 +472,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
                   color: "var(--warm-gray)",
                   fontWeight: 700,
                   letterSpacing: 0.8,
-                  textTransform: "uppercase",
+                  textTransform: "uppercase"
                 }}
               >
                 Start HYS balance
@@ -434,7 +488,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
                   border: "1px solid var(--border)",
                   background: "var(--cream)",
                   fontSize: 13,
-                  fontFamily: "inherit",
+                  fontFamily: "inherit"
                 }}
               />
             </div>
@@ -446,7 +500,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
                   color: "var(--warm-gray)",
                   fontWeight: 700,
                   letterSpacing: 0.8,
-                  textTransform: "uppercase",
+                  textTransform: "uppercase"
                 }}
               >
                 Months
@@ -462,7 +516,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
                   border: "1px solid var(--border)",
                   background: "var(--cream)",
                   fontSize: 13,
-                  fontFamily: "inherit",
+                  fontFamily: "inherit"
                 }}
               >
                 {[6, 9, 12, 18, 24, 36].map((n) => (
@@ -472,6 +526,29 @@ for (let i = 0; i < monthsAhead; i += 1) {
                 ))}
               </select>
             </div>
+
+            {showAutoStartButton ? (
+              <div style={{ flex: "1 1 160px", alignSelf: "end" }}>
+                <button
+                  type="button"
+                  onClick={applyAutoStart}
+                  style={{
+                    width: "100%",
+                    marginTop: 6,
+                    padding: "10px 10px",
+                    borderRadius: 10,
+                    border: "1px solid var(--border)",
+                    background: "white",
+                    fontSize: 12,
+                    fontFamily: "inherit",
+                    cursor: "pointer",
+                    fontWeight: 800
+                  }}
+                >
+                  Apply Plan balances
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -481,7 +558,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
             background: "white",
             border: "1px solid var(--border)",
             borderRadius: 14,
-            padding: "14px 16px",
+            padding: "14px 16px"
           }}
         >
           <div
@@ -490,7 +567,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
               color: "var(--warm-gray)",
               fontWeight: 700,
               letterSpacing: 1,
-              textTransform: "uppercase",
+              textTransform: "uppercase"
             }}
           >
             Base budgets
@@ -500,30 +577,15 @@ for (let i = 0; i < monthsAhead; i += 1) {
               marginTop: 8,
               display: "flex",
               flexDirection: "column",
-              gap: 8,
+              gap: 8
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 10,
-              }}
-            >
-              <div style={{ fontSize: 12, color: "var(--warm-gray)" }}>
-                Fixed
-              </div>
-              <div style={{ fontSize: 14, fontWeight: 900 }}>
-                {fmtMoney0(props.baseFixed)}
-              </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--warm-gray)" }}>Fixed</div>
+              <div style={{ fontSize: 14, fontWeight: 900 }}>{fmtMoney0(props.baseFixed)}</div>
             </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 10,
-              }}
-            >
+
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
               <div style={{ fontSize: 12, color: "var(--warm-gray)" }}>
                 Controlled discretionary
               </div>
@@ -531,30 +593,16 @@ for (let i = 0; i < monthsAhead; i += 1) {
                 {fmtMoney0(props.baseDiscControlled)}
               </div>
             </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 10,
-              }}
-            >
-              <div style={{ fontSize: 12, color: "var(--warm-gray)" }}>
-                Austin weekly
-              </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--warm-gray)" }}>Austin weekly</div>
               <div style={{ fontSize: 14, fontWeight: 900 }}>
                 {fmtMoney0(props.austinWeekly || 0)}
               </div>
             </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 10,
-              }}
-            >
-              <div style={{ fontSize: 12, color: "var(--warm-gray)" }}>
-                Jenna weekly
-              </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--warm-gray)" }}>Jenna weekly</div>
               <div style={{ fontSize: 14, fontWeight: 900 }}>
                 {fmtMoney0(props.jennaWeekly || 0)}
               </div>
@@ -582,7 +630,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
               color: "var(--warm-gray)",
               fontWeight: 700,
               letterSpacing: 0.6,
-              textTransform: "uppercase",
+              textTransform: "uppercase"
             }}
           >
             <div style={{ flex: "0 0 150px" }}>Month</div>
@@ -596,23 +644,12 @@ for (let i = 0; i < monthsAhead; i += 1) {
             <div style={{ flex: "1 1 160px" }}>End HYS</div>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 10,
-              marginTop: 10,
-            }}
-          >
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
             {rows.map((r) => {
-              const isSelected = props.selectedMonth
-                ? isSameMonth(r.month, props.selectedMonth)
-                : false;
+              const isSelected = props.selectedMonth ? isSameMonth(r.month, props.selectedMonth) : false;
 
-              const overflowColor =
-                r.monthOverflow >= 0 ? "#166534" : "#991B1B";
-              const endOverflowColor =
-                r.endOverflow >= 0 ? "#166534" : "#991B1B";
+              const overflowColor = r.monthOverflow >= 0 ? "#166534" : "#991B1B";
+              const endOverflowColor = r.endOverflow >= 0 ? "#166534" : "#991B1B";
 
               return (
                 <div
@@ -622,10 +659,8 @@ for (let i = 0; i < monthsAhead; i += 1) {
                     borderRadius: 14,
                     overflow: "hidden",
                     background: "white",
-                    outline: isSelected
-                      ? "2px solid rgba(99,102,241,0.35)"
-                      : "none",
-                    outlineOffset: 0,
+                    outline: isSelected ? "2px solid rgba(99,102,241,0.35)" : "none",
+                    outlineOffset: 0
                   }}
                 >
                   <div
@@ -634,7 +669,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
                       display: "flex",
                       flexWrap: "wrap",
                       alignItems: "center",
-                      gap: 10,
+                      gap: 10
                     }}
                   >
                     <button
@@ -650,7 +685,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
                         cursor: props.onSelectMonth ? "pointer" : "default",
                         fontFamily: "DM Serif Display, serif",
                         fontSize: 16,
-                        color: "var(--ink)",
+                        color: "var(--ink)"
                       }}
                     >
                       {monthLabel(r.month)}
@@ -661,7 +696,7 @@ for (let i = 0; i < monthsAhead; i += 1) {
                         flex: "1 1 120px",
                         fontWeight: 900,
                         color: "#166534",
-                        fontVariantNumeric: "tabular-nums",
+                        fontVariantNumeric: "tabular-nums"
                       }}
                     >
                       {fmtMoney0(r.incomeTotal)}
@@ -670,48 +705,23 @@ for (let i = 0; i < monthsAhead; i += 1) {
                           fontSize: 10,
                           color: "var(--warm-gray)",
                           fontWeight: 600,
-                          marginTop: 2,
+                          marginTop: 2
                         }}
                       >
-                        Austin {fmtMoney0(r.incomeAustin)} · Jenna{" "}
-                        {fmtMoney0(r.incomeJenna)}
+                        Austin {fmtMoney0(r.incomeAustin)} · Jenna {fmtMoney0(r.incomeJenna)}
                       </div>
                     </div>
 
-                    <div
-                      style={{
-                        flex: "1 1 120px",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      <div style={{ fontWeight: 900 }}>
-                        {fmtMoney0(r.fixedTotal)}
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 8,
-                          marginTop: 6,
-                          alignItems: "center",
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 10,
-                            color: "var(--warm-gray)",
-                            fontWeight: 700,
-                          }}
-                        >
+                    <div style={{ flex: "1 1 120px", fontVariantNumeric: "tabular-nums" }}>
+                      <div style={{ fontWeight: 900 }}>{fmtMoney0(r.fixedTotal)}</div>
+                      <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
+                        <span style={{ fontSize: 10, color: "var(--warm-gray)", fontWeight: 700 }}>
                           Add
                         </span>
                         <input
                           value={String(state.perMonth[r.mKey]?.addFixed ?? 0)}
                           onChange={(e) =>
-                            setMonthField(
-                              r.mKey,
-                              "addFixed",
-                              parseMoneyInput(e.target.value)
-                            )
+                            setMonthField(r.mKey, "addFixed", parseMoneyInput(e.target.value))
                           }
                           style={{
                             width: 90,
@@ -720,46 +730,22 @@ for (let i = 0; i < monthsAhead; i += 1) {
                             border: "1px solid var(--border)",
                             background: "var(--cream)",
                             fontSize: 12,
-                            fontFamily: "inherit",
+                            fontFamily: "inherit"
                           }}
                         />
                       </div>
                     </div>
 
-                    <div
-                      style={{
-                        flex: "1 1 140px",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      <div style={{ fontWeight: 900 }}>
-                        {fmtMoney0(r.discTotal)}
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 8,
-                          marginTop: 6,
-                          alignItems: "center",
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 10,
-                            color: "var(--warm-gray)",
-                            fontWeight: 700,
-                          }}
-                        >
+                    <div style={{ flex: "1 1 140px", fontVariantNumeric: "tabular-nums" }}>
+                      <div style={{ fontWeight: 900 }}>{fmtMoney0(r.discTotal)}</div>
+                      <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
+                        <span style={{ fontSize: 10, color: "var(--warm-gray)", fontWeight: 700 }}>
                           Add
                         </span>
                         <input
                           value={String(state.perMonth[r.mKey]?.addDisc ?? 0)}
                           onChange={(e) =>
-                            setMonthField(
-                              r.mKey,
-                              "addDisc",
-                              parseMoneyInput(e.target.value)
-                            )
+                            setMonthField(r.mKey, "addDisc", parseMoneyInput(e.target.value))
                           }
                           style={{
                             width: 90,
@@ -768,32 +754,19 @@ for (let i = 0; i < monthsAhead; i += 1) {
                             border: "1px solid var(--border)",
                             background: "var(--cream)",
                             fontSize: 12,
-                            fontFamily: "inherit",
+                            fontFamily: "inherit"
                           }}
                         />
                       </div>
                     </div>
 
-                    <div
-                      style={{
-                        flex: "1 1 120px",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      <div style={{ fontWeight: 900 }}>
-                        {fmtMoney0(r.otherSpend)}
-                      </div>
+                    <div style={{ flex: "1 1 120px", fontVariantNumeric: "tabular-nums" }}>
+                      <div style={{ fontWeight: 900 }}>{fmtMoney0(r.otherSpend)}</div>
                       <div style={{ marginTop: 6 }}>
                         <input
-                          value={String(
-                            state.perMonth[r.mKey]?.otherSpend ?? 0
-                          )}
+                          value={String(state.perMonth[r.mKey]?.otherSpend ?? 0)}
                           onChange={(e) =>
-                            setMonthField(
-                              r.mKey,
-                              "otherSpend",
-                              parseMoneyInput(e.target.value)
-                            )
+                            setMonthField(r.mKey, "otherSpend", parseMoneyInput(e.target.value))
                           }
                           style={{
                             width: 110,
@@ -802,32 +775,19 @@ for (let i = 0; i < monthsAhead; i += 1) {
                             border: "1px solid var(--border)",
                             background: "var(--cream)",
                             fontSize: 12,
-                            fontFamily: "inherit",
+                            fontFamily: "inherit"
                           }}
                         />
                       </div>
                     </div>
 
-                    <div
-                      style={{
-                        flex: "1 1 120px",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      <div style={{ fontWeight: 900 }}>
-                        {fmtMoney0(r.hysTransfer)}
-                      </div>
+                    <div style={{ flex: "1 1 120px", fontVariantNumeric: "tabular-nums" }}>
+                      <div style={{ fontWeight: 900 }}>{fmtMoney0(r.hysTransfer)}</div>
                       <div style={{ marginTop: 6 }}>
                         <input
-                          value={String(
-                            state.perMonth[r.mKey]?.hysTransfer ?? 0
-                          )}
+                          value={String(state.perMonth[r.mKey]?.hysTransfer ?? 0)}
                           onChange={(e) =>
-                            setMonthField(
-                              r.mKey,
-                              "hysTransfer",
-                              parseMoneyInput(e.target.value)
-                            )
+                            setMonthField(r.mKey, "hysTransfer", parseMoneyInput(e.target.value))
                           }
                           style={{
                             width: 110,
@@ -836,78 +796,40 @@ for (let i = 0; i < monthsAhead; i += 1) {
                             border: "1px solid var(--border)",
                             background: "var(--cream)",
                             fontSize: 12,
-                            fontFamily: "inherit",
+                            fontFamily: "inherit"
                           }}
                         />
                       </div>
                     </div>
 
-                    <div
-                      style={{
-                        flex: "1 1 140px",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
+                    <div style={{ flex: "1 1 140px", fontVariantNumeric: "tabular-nums" }}>
                       <div
                         style={{
                           fontFamily: "DM Serif Display, serif",
                           fontSize: 20,
-                          color: overflowColor,
+                          color: overflowColor
                         }}
                       >
                         {r.monthOverflow >= 0 ? "+" : ""}
                         {fmtMoney0(r.monthOverflow)}
                       </div>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          color: "var(--warm-gray)",
-                          fontWeight: 600,
-                          marginTop: 2,
-                        }}
-                      >
+                      <div style={{ fontSize: 10, color: "var(--warm-gray)", fontWeight: 600, marginTop: 2 }}>
                         This month
                       </div>
                     </div>
 
-                    <div
-                      style={{
-                        flex: "1 1 160px",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
+                    <div style={{ flex: "1 1 160px", fontVariantNumeric: "tabular-nums" }}>
                       <div style={{ fontWeight: 900, color: endOverflowColor }}>
                         {fmtMoney0(r.endOverflow)}
                       </div>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          color: "var(--warm-gray)",
-                          fontWeight: 600,
-                          marginTop: 2,
-                        }}
-                      >
+                      <div style={{ fontSize: 10, color: "var(--warm-gray)", fontWeight: 600, marginTop: 2 }}>
                         Ending overflow
                       </div>
                     </div>
 
-                    <div
-                      style={{
-                        flex: "1 1 160px",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      <div style={{ fontWeight: 900, color: "#166534" }}>
-                        {fmtMoney0(r.endHys)}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          color: "var(--warm-gray)",
-                          fontWeight: 600,
-                          marginTop: 2,
-                        }}
-                      >
+                    <div style={{ flex: "1 1 160px", fontVariantNumeric: "tabular-nums" }}>
+                      <div style={{ fontWeight: 900, color: "#166534" }}>{fmtMoney0(r.endHys)}</div>
+                      <div style={{ fontSize: 10, color: "var(--warm-gray)", fontWeight: 600, marginTop: 2 }}>
                         Ending HYS
                       </div>
                     </div>
@@ -923,12 +845,11 @@ for (let i = 0; i < monthsAhead; i += 1) {
                       gap: 14,
                       alignItems: "center",
                       color: "var(--warm-gray)",
-                      fontSize: 11,
+                      fontSize: 11
                     }}
                   >
                     <span>
-                      Fixed base {fmtMoney0(r.fixedBase)} · Disc base{" "}
-                      {fmtMoney0(r.discBase)}
+                      Fixed base {fmtMoney0(r.fixedBase)} · Disc base {fmtMoney0(r.discBase)}
                     </span>
                     <span>Inputs saved automatically</span>
                   </div>
