@@ -2,9 +2,6 @@
 import { parsePlanFromCsvText, PlanData } from "../lib/plan";
 import { useEffect, useMemo, useState } from "react";
 
-export const PLAN_CSV_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSyGwb7qnavzNq9ZqNpiN4D7dByaoPUjTnDHw2qDkdnPcUJ4ug2_aqbPTUNKQQko4Uuu-6JZOCNKCsE/pub?gid=835419007&single=true&output=csv";
-
 function defaultPlan(): PlanData {
   return {
     loaded: false,
@@ -23,13 +20,28 @@ function defaultPlan(): PlanData {
       Food: 0,
       Gas: 0,
       "General Merchandise": 0,
-      Other: 0,
+      Other: 0
     },
     utilitiesBudgets: {},
     utilitiesOrderFromPlan: [],
     austinWeekly: 0,
-    jennaWeekly: 0,
+    jennaWeekly: 0
   };
+}
+
+function csvEscape(value: any): string {
+  const s = value == null ? "" : String(value);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function rowsToCsv(headers: string[], rows: any[][]): string {
+  const lines: string[] = [];
+  lines.push(headers.map(csvEscape).join(","));
+  for (const r of rows) {
+    lines.push((r ?? []).map(csvEscape).join(","));
+  }
+  return lines.join("\n");
 }
 
 export function usePlan() {
@@ -40,11 +52,27 @@ export function usePlan() {
 
     async function loadPlan() {
       try {
-        const url = PLAN_CSV_URL + "&cb=" + Date.now();
-        const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) throw new Error(`PLAN HTTP ${res.status}`);
-        const text = await res.text();
-        const parsed = parsePlanFromCsvText(text);
+        const apiKey =
+          (process.env.REACT_APP_API_KEY as string | undefined) ||
+          (process.env.REACT_APP_APP_KEY as string | undefined) ||
+          "";
+
+        const res = await fetch(`/api/plan?cb=${Date.now()}`, {
+          cache: "no-store",
+          headers: apiKey ? { "x-app-key": apiKey } : undefined
+        });
+
+        if (!res.ok) {
+          const msg = await res.text().catch(() => "");
+          throw new Error(`PLAN HTTP ${res.status}${msg ? ` ${msg}` : ""}`);
+        }
+
+        const data = await res.json();
+        const headers: string[] = Array.isArray(data?.headers) ? data.headers : [];
+        const rows: any[][] = Array.isArray(data?.rows) ? data.rows : [];
+
+        const csvText = rowsToCsv(headers, rows);
+        const parsed = parsePlanFromCsvText(csvText);
 
         if (!alive) return;
         setPlan(parsed);
@@ -53,7 +81,7 @@ export function usePlan() {
         setPlan((prev) => ({
           ...(prev ?? defaultPlan()),
           loaded: true,
-          error: e?.message || String(e),
+          error: e?.message || String(e)
         }));
       }
     }
