@@ -288,28 +288,65 @@ export default function App() {
     }
   });
   const [pwError, setPwError] = useState("");
-  const [tab, setTab] = useState<Tab>("budget_overview");
+ const [tab, setTab] = useState<Tab>("budget_overview")
 
-  const {
-    loading,
-    err,
-    months,
-    selectedMonth,
-    setSelectedMonth,
-    txByMonth,
-    monthTx,
-  } = useTransactions();
+const {
+  loading,
+  err,
+  months,
+  selectedMonth,
+  setSelectedMonth,
+  txByMonth,
+  monthTx
+} = useTransactions()
 
-  const { plan, hasPlan } = usePlan();
+const { plan, hasPlan } = usePlan()
 
-  const [filter, setFilter] = useState<string>("all");
-  const [showCount, setShowCount] = useState<number>(20);
-  const [selectedFixedLine, setSelectedFixedLine] = useState<string>("");
-  const [selectedUtilityLine, setSelectedUtilityLine] = useState<string>("");
+const [filter, setFilter] = useState<string>("all")
+const [showCount, setShowCount] = useState<number>(20)
+const [selectedFixedLine, setSelectedFixedLine] = useState<string>("")
+const [selectedUtilityLine, setSelectedUtilityLine] = useState<string>("")
 
-  function tryUnlock() {
-    if (pw.trim().toLowerCase() === DASHBOARD_PASSWORD) {
-      try {
+const [planOverrides, setPlanOverrides] = useState({
+  addInc: "",
+  addFix: "",
+  austinPay: "",
+  jennaPay: "",
+  descrAdd: ""
+})
+const [savingPlanOverrides, setSavingPlanOverrides] = useState(false)
+const [planOverridesMsg, setPlanOverridesMsg] = useState("")
+
+async function savePlanOverrides() {
+  setSavingPlanOverrides(true)
+  setPlanOverridesMsg("")
+
+  try {
+    const r = await fetch("/api/planWrite", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-app-key": process.env.REACT_APP_APP_KEY || ""
+      },
+      body: JSON.stringify(planOverrides)
+    })
+
+    if (!r.ok) {
+      const t = await r.text()
+      throw new Error(`HTTP ${r.status} ${t}`)
+    }
+
+    setPlanOverridesMsg("Saved")
+  } catch (e: any) {
+    setPlanOverridesMsg(e?.message || "Save failed")
+  } finally {
+    setSavingPlanOverrides(false)
+  }
+}
+
+function tryUnlock() {
+  if (pw.trim().toLowerCase() === DASHBOARD_PASSWORD) {
+    try {
         localStorage.setItem("budget_unlocked", "1");
       } catch {}
       setUnlocked(true);
@@ -1504,14 +1541,115 @@ const budgetIncome = isCurrentMonth
                   })}
                 </div>
 
-                <div style={{ padding: "10px 14px", fontSize: 11, color: "var(--warm-gray)", borderTop: "1px solid var(--border)" }}>
-                  Current month uses projection rules. Savings transfer uses plan HYS value if no actual transfer found.
+              <div
+                style={{
+                  padding: "10px 14px",
+                  fontSize: 11,
+                  color: "var(--warm-gray)",
+                  borderTop: "1px solid var(--border)"
+                }}
+              >
+                Current month uses projection rules. Savings transfer uses plan HYS value if no actual transfer found.
+              </div>
+
+              {/* PLAN writeback inputs, writes to PLAN!H2:H6 */}
+              <div style={{ borderTop: "1px solid var(--border)", padding: "14px" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6 }}>Pay and plan overrides</div>
+                <div style={{ fontSize: 11, color: "var(--warm-gray)", marginBottom: 10 }}>
+                  Updates your Google Sheet cells G2:H6 by writing values into H2:H6.
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 10, rowGap: 8 }}>
+                  <div style={{ fontWeight: 700, fontSize: 12 }}>Add. Inc</div>
+                  <input
+                    value={planOverrides.addInc}
+                    onChange={(e) => setPlanOverrides((p) => ({ ...p, addInc: e.target.value }))}
+                    placeholder="Example 0 or 250"
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid var(--border)",
+                      background: "var(--card)"
+                    }}
+                  />
+
+                  <div style={{ fontWeight: 700, fontSize: 12 }}>Add. Fix</div>
+                  <input
+                    value={planOverrides.addFix}
+                    onChange={(e) => setPlanOverrides((p) => ({ ...p, addFix: e.target.value }))}
+                    placeholder="Example 0 or 125"
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid var(--border)",
+                      background: "var(--card)"
+                    }}
+                  />
+
+                  <div style={{ fontWeight: 700, fontSize: 12 }}>Austin Pay</div>
+                  <input
+                    value={planOverrides.austinPay}
+                    onChange={(e) => setPlanOverrides((p) => ({ ...p, austinPay: e.target.value }))}
+                    placeholder="Example 2500"
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid var(--border)",
+                      background: "var(--card)"
+                    }}
+                  />
+
+                  <div style={{ fontWeight: 700, fontSize: 12 }}>Jenna Pay</div>
+                  <input
+                    value={planOverrides.jennaPay}
+                    onChange={(e) => setPlanOverrides((p) => ({ ...p, jennaPay: e.target.value }))}
+                    placeholder="Example 1800"
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid var(--border)",
+                      background: "var(--card)"
+                    }}
+                  />
+
+                  <div style={{ fontWeight: 700, fontSize: 12 }}>Descr Add</div>
+                  <input
+                    value={planOverrides.descrAdd}
+                    onChange={(e) => setPlanOverrides((p) => ({ ...p, descrAdd: e.target.value }))}
+                    placeholder="Example $500"
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid var(--border)",
+                      background: "var(--card)"
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
+                  <button
+                    onClick={savePlanOverrides}
+                    disabled={savingPlanOverrides}
+                    style={{
+                      padding: "9px 12px",
+                      borderRadius: 12,
+                      border: "1px solid var(--border)",
+                      background: "var(--card)",
+                      fontWeight: 800,
+                      cursor: savingPlanOverrides ? "default" : "pointer"
+                    }}
+                  >
+                    {savingPlanOverrides ? "Saving…" : "Save to Sheet"}
+                  </button>
+                  <div style={{ fontSize: 12, color: "var(--warm-gray)" }}>{planOverridesMsg}</div>
                 </div>
               </div>
-            </>
-          )}
-        </main>
-      ) : null}
+            </div>
+          </>
+        )}
+
+      </main>
+    ) : null}
 
       {tab === "history" ? (
         <main>
