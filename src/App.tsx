@@ -316,23 +316,20 @@ const [planOverrides, setPlanOverrides] = useState({
   jennaPay: "",
   descrAdd: ""
 })
-const [planOverridesPopulated, setPlanOverridesPopulated] = useState(false)
 const [savingPlanOverrides, setSavingPlanOverrides] = useState(false)
 const [planOverridesMsg, setPlanOverridesMsg] = useState("")
 
-// Pre-populate inputs from current sheet values once plan loads
+// Sync inputs from sheet values whenever plan loads or refreshes
 useEffect(() => {
-  if (hasPlan && !planOverridesPopulated) {
-    setPlanOverrides({
-      addInc: plan.incomeProjection ? String(plan.incomeProjection) : "",
-      addFix: plan.addFix ? String(plan.addFix) : "",
-      austinPay: plan.austinWeekly ? String(plan.austinWeekly) : "",
-      jennaPay: plan.jennaWeekly ? String(plan.jennaWeekly) : "",
-      descrAdd: plan.addDesc ? String(plan.addDesc) : ""
-    })
-    setPlanOverridesPopulated(true)
-  }
-}, [hasPlan, plan, planOverridesPopulated])
+  if (!hasPlan) return
+  setPlanOverrides({
+    addInc: plan.addIncCount !== 0 ? String(plan.addIncCount) : "",
+    addFix: plan.addFix !== 0 ? String(plan.addFix) : "",
+    austinPay: plan.austinPayCount !== 0 ? String(plan.austinPayCount) : "",
+    jennaPay: plan.jennaPayCount !== 0 ? String(plan.jennaPayCount) : "",
+    descrAdd: plan.addDesc !== 0 ? String(plan.addDesc) : ""
+  })
+}, [hasPlan, plan])
 
 async function savePlanOverrides() {
   setSavingPlanOverrides(true)
@@ -356,7 +353,6 @@ async function savePlanOverrides() {
     setPlanOverridesMsg("Saving\u2026 refreshing data")
     // Allow sheet to propagate, then refresh plan data
     await new Promise((res) => setTimeout(res, 1200))
-    setPlanOverridesPopulated(false)
     refreshPlan()
     setPlanOverridesMsg("Saved \u2014 data refreshed")
   } catch (e: any) {
@@ -1093,7 +1089,7 @@ const budgetIncome = isCurrentMonth
   ] as const;
 
   return (
-    <div style={{ paddingBottom: 72 }}>
+    <div style={{ paddingBottom: 72, paddingTop: 52 }}>
       <header>
         <div className="header-top">
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -1192,6 +1188,98 @@ const budgetIncome = isCurrentMonth
           </div>
         </div>
       </header>
+
+      {/* ── Fixed global save bar — always visible on all tabs ── */}
+      <div
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 200,
+          background: "var(--ink)",
+          borderBottom: "1px solid rgba(255,255,255,0.10)",
+          padding: "6px 14px",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: "var(--cream)", opacity: 0.5, textTransform: "uppercase", letterSpacing: 0.8 }}>Add. Inc</span>
+            <input
+              value={planOverrides.addInc}
+              onChange={(e) => setPlanOverrides((p) => ({ ...p, addInc: e.target.value }))}
+              placeholder="0"
+              type="number"
+              style={{ width: 72, padding: "4px 7px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.07)", color: "var(--cream)", fontSize: 12 }}
+            />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: "var(--cream)", opacity: 0.5, textTransform: "uppercase", letterSpacing: 0.8 }}>Add. Fix</span>
+            <input
+              value={planOverrides.addFix}
+              onChange={(e) => setPlanOverrides((p) => ({ ...p, addFix: e.target.value }))}
+              placeholder="0"
+              type="number"
+              style={{ width: 72, padding: "4px 7px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.07)", color: "var(--cream)", fontSize: 12 }}
+            />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: "var(--cream)", opacity: 0.5, textTransform: "uppercase", letterSpacing: 0.8 }}>Austin Pay</span>
+            <input
+              value={planOverrides.austinPay}
+              onChange={(e) => setPlanOverrides((p) => ({ ...p, austinPay: e.target.value }))}
+              placeholder="0"
+              type="number"
+              style={{ width: 72, padding: "4px 7px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.07)", color: "var(--cream)", fontSize: 12 }}
+            />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: "var(--cream)", opacity: 0.5, textTransform: "uppercase", letterSpacing: 0.8 }}>Jenna Pay</span>
+            <input
+              value={planOverrides.jennaPay}
+              onChange={(e) => setPlanOverrides((p) => ({ ...p, jennaPay: e.target.value }))}
+              placeholder="0"
+              type="number"
+              style={{ width: 72, padding: "4px 7px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.07)", color: "var(--cream)", fontSize: 12 }}
+            />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: "var(--cream)", opacity: 0.5, textTransform: "uppercase", letterSpacing: 0.8 }}>Descr Add</span>
+            <input
+              value={planOverrides.descrAdd}
+              onChange={(e) => setPlanOverrides((p) => ({ ...p, descrAdd: e.target.value }))}
+              placeholder="0"
+              type="number"
+              style={{ width: 72, padding: "4px 7px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.07)", color: "var(--cream)", fontSize: 12 }}
+            />
+          </div>
+          <button
+            onClick={savePlanOverrides}
+            disabled={savingPlanOverrides}
+            style={{
+              marginTop: 12,
+              padding: "6px 14px",
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.25)",
+              background: savingPlanOverrides ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.14)",
+              color: "var(--cream)",
+              fontWeight: 800,
+              fontSize: 12,
+              cursor: savingPlanOverrides ? "default" : "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {savingPlanOverrides ? "Saving…" : "Save to Sheet"}
+          </button>
+          {planOverridesMsg ? (
+            <div style={{ marginTop: 12, fontSize: 11, color: "rgba(250,247,242,0.5)" }}>{planOverridesMsg}</div>
+          ) : null}
+        </div>
+      </div>
 
       {plan.error ? (
         <div className="error-banner">
@@ -1574,98 +1662,7 @@ const budgetIncome = isCurrentMonth
                 Current month uses projection rules. Savings transfer uses plan HYS value if no actual transfer found.
               </div>
 
-              {/* PLAN writeback inputs, writes to PLAN!H2:H6 */}
-              <div style={{ borderTop: "1px solid var(--border)", padding: "14px" }}>
-                <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6 }}>Pay and plan overrides</div>
-                <div style={{ fontSize: 11, color: "var(--warm-gray)", marginBottom: 10 }}>
-                  Updates your Google Sheet cells G2:H6 by writing values into H2:H6.
-                </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 10, rowGap: 8 }}>
-                  <div style={{ fontWeight: 700, fontSize: 12 }}>Add. Inc</div>
-                  <input
-                    value={planOverrides.addInc}
-                    onChange={(e) => setPlanOverrides((p) => ({ ...p, addInc: e.target.value }))}
-                    placeholder="Example 0 or 250"
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: 10,
-                      border: "1px solid var(--border)",
-                      background: "var(--card)"
-                    }}
-                  />
-
-                  <div style={{ fontWeight: 700, fontSize: 12 }}>Add. Fix</div>
-                  <input
-                    value={planOverrides.addFix}
-                    onChange={(e) => setPlanOverrides((p) => ({ ...p, addFix: e.target.value }))}
-                    placeholder="Example 0 or 125"
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: 10,
-                      border: "1px solid var(--border)",
-                      background: "var(--card)"
-                    }}
-                  />
-
-                  <div style={{ fontWeight: 700, fontSize: 12 }}>Austin Pay</div>
-                  <input
-                    value={planOverrides.austinPay}
-                    onChange={(e) => setPlanOverrides((p) => ({ ...p, austinPay: e.target.value }))}
-                    placeholder="Example 2500"
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: 10,
-                      border: "1px solid var(--border)",
-                      background: "var(--card)"
-                    }}
-                  />
-
-                  <div style={{ fontWeight: 700, fontSize: 12 }}>Jenna Pay</div>
-                  <input
-                    value={planOverrides.jennaPay}
-                    onChange={(e) => setPlanOverrides((p) => ({ ...p, jennaPay: e.target.value }))}
-                    placeholder="Example 1800"
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: 10,
-                      border: "1px solid var(--border)",
-                      background: "var(--card)"
-                    }}
-                  />
-
-                  <div style={{ fontWeight: 700, fontSize: 12 }}>Descr Add</div>
-                  <input
-                    value={planOverrides.descrAdd}
-                    onChange={(e) => setPlanOverrides((p) => ({ ...p, descrAdd: e.target.value }))}
-                    placeholder="Example $500"
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: 10,
-                      border: "1px solid var(--border)",
-                      background: "var(--card)"
-                    }}
-                  />
-                </div>
-
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
-                  <button
-                    onClick={savePlanOverrides}
-                    disabled={savingPlanOverrides}
-                    style={{
-                      padding: "9px 12px",
-                      borderRadius: 12,
-                      border: "1px solid var(--border)",
-                      background: "var(--card)",
-                      fontWeight: 800,
-                      cursor: savingPlanOverrides ? "default" : "pointer"
-                    }}
-                  >
-                    {savingPlanOverrides ? "Saving…" : "Save to Sheet"}
-                  </button>
-                  <div style={{ fontSize: 12, color: "var(--warm-gray)" }}>{planOverridesMsg}</div>
-                </div>
-              </div>
             </div>
           </>
         )}
