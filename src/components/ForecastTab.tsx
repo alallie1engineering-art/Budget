@@ -60,12 +60,26 @@ function countWeekdayInMonth(m0: Date, weekday: number) {
 }
 
 function parseMonthCell(v: any): Date | null {
-  if (!v) return null;
+  if (!v && v !== 0) return null;
+
+  // Google Sheets serial number (UNFORMATTED_VALUE for date cells)
+  // Google serial: days since Dec 30, 1899
+  if (typeof v === "number" && Number.isFinite(v) && v > 1000) {
+    const ms = (v - 25569) * 86400 * 1000; // convert to Unix ms (25569 = days between 1899-12-30 and 1970-01-01)
+    const d = new Date(ms);
+    if (!Number.isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), 1);
+  }
+
   if (v instanceof Date) return new Date(v.getFullYear(), v.getMonth(), 1);
+
   const s = String(v).trim();
   if (!s) return null;
-  const d = new Date(s);
-  return !Number.isNaN(d.getTime()) ? new Date(d.getFullYear(), d.getMonth(), 1) : null;
+
+  // Try ISO format first (most reliable)
+  const iso = new Date(s);
+  if (!Number.isNaN(iso.getTime())) return new Date(iso.getFullYear(), iso.getMonth(), 1);
+
+  return null;
 }
 
 function safeNum(v: any) {
@@ -222,10 +236,20 @@ export default function ForecastTab(props: ForecastTabProps) {
 
   async function saveMonthToSheet(mKey: string) {
     setSaveError("");
-    if (!sheetMap.ready || !sheetMap.monthColByKey[mKey]) return;
+    if (!sheetMap.ready) {
+      setSaveError("Sheet map not loaded yet — try Reload sheet");
+      return;
+    }
+    if (!sheetMap.monthColByKey[mKey]) {
+      setSaveError(`Month ${mKey} not found in sheet. Sheet may need a column for this month.`);
+      return;
+    }
     const col = sheetMap.monthColByKey[mKey];
     const { incomeRow, fixedRow, discRow, hysRow } = sheetMap;
-    if (!incomeRow || !fixedRow || !discRow || !hysRow) return;
+    if (!incomeRow || !fixedRow || !discRow || !hysRow) {
+      setSaveError(`Missing forecast rows — Income:${incomeRow} Fixed:${fixedRow} Disc:${discRow} HYS:${hysRow}`);
+      return;
+    }
     const inp = state.perMonth[mKey] || { incomeAdd: 0, addFixed: 0, addDisc: 0, hysTransfer: 0 };
     setSaving(true);
     try {
@@ -240,7 +264,10 @@ export default function ForecastTab(props: ForecastTabProps) {
           { row: hysRow, col, value: clampFinite(inp.hysTransfer) },
         ]})
       });
-      if (!res.ok) throw new Error(`WRITE HTTP ${res.status}`);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        throw new Error(`WRITE HTTP ${res.status}: ${errText}`);
+      }
     } catch (e: any) {
       setSaveError(e?.message || String(e));
     } finally {

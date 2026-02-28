@@ -96,7 +96,7 @@ module.exports = async function handler(req, res) {
     const sheets = google.sheets({ version: "v4", auth });
 
     const range = `${sheetName}!A:Z`;
-    const resp = await sheets.spreadsheets.values.get({ spreadsheetId, range });
+    const resp = await sheets.spreadsheets.values.get({ spreadsheetId, range, valueRenderOption: "UNFORMATTED_VALUE" });
     const values = (resp && resp.data && resp.data.values) || [];
 
     if (values.length < 2) return sendJson(res, 200, { headers: [], rows: [] });
