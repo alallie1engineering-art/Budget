@@ -1,5 +1,6 @@
 // src/App.tsx
-import React, { useEffect, useMemo, useState } from "react";
+
+
 import {
   BUDGETS,
   BUCKETS,
@@ -39,7 +40,7 @@ import { DonutRing } from "./components/DonutRing";
 import { VarianceBarLive } from "./components/VarianceBarLive";
 import { FixedHealthBanner } from "./components/FixedHealthBanner";
 import { SavingsBarChart } from "./components/Savingsbarchart";
-
+import React, { useEffect, useMemo, useState } from "react"
 const DASHBOARD_PASSWORD = "skeetsie";
 
 const BUCKET_PILL: Record<string, { bg: string; color: string }> = {
@@ -315,20 +316,23 @@ const [planOverrides, setPlanOverrides] = useState({
   jennaPay: "",
   descrAdd: ""
 })
+const [planOverridesPopulated, setPlanOverridesPopulated] = useState(false)
 const [savingPlanOverrides, setSavingPlanOverrides] = useState(false)
 const [planOverridesMsg, setPlanOverridesMsg] = useState("")
 
-// Sync inputs from sheet values whenever plan loads or refreshes
+// Pre-populate inputs from current sheet values once plan loads
 useEffect(() => {
-  if (!hasPlan) return
-  setPlanOverrides({
-    addInc: plan.addIncCount ? String(plan.addIncCount) : "",
-    addFix: plan.addFix ? String(plan.addFix) : "",
-    austinPay: plan.austinPayCount ? String(plan.austinPayCount) : "",
-    jennaPay: plan.jennaPayCount ? String(plan.jennaPayCount) : "",
-    descrAdd: plan.addDesc ? String(plan.addDesc) : ""
-  })
-}, [hasPlan, plan])
+  if (hasPlan && !planOverridesPopulated) {
+    setPlanOverrides({
+      addInc: plan.incomeProjection ? String(plan.incomeProjection) : "",
+      addFix: plan.addFix ? String(plan.addFix) : "",
+      austinPay: plan.austinWeekly ? String(plan.austinWeekly) : "",
+      jennaPay: plan.jennaWeekly ? String(plan.jennaWeekly) : "",
+      descrAdd: plan.addDesc ? String(plan.addDesc) : ""
+    })
+    setPlanOverridesPopulated(true)
+  }
+}, [hasPlan, plan, planOverridesPopulated])
 
 async function savePlanOverrides() {
   setSavingPlanOverrides(true)
@@ -352,6 +356,7 @@ async function savePlanOverrides() {
     setPlanOverridesMsg("Saving\u2026 refreshing data")
     // Allow sheet to propagate, then refresh plan data
     await new Promise((res) => setTimeout(res, 1200))
+    setPlanOverridesPopulated(false)
     refreshPlan()
     setPlanOverridesMsg("Saved \u2014 data refreshed")
   } catch (e: any) {

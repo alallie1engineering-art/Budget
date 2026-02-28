@@ -1,28 +1,42 @@
 // src/components/ForecastTab.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fmtMoney0 } from "../lib/format";
 import { isSameMonth, monthKey, monthLabel } from "../lib/dates";
 
 type MonthInputs = {
+  incomeAdd: number;
   addFixed: number;
   addDisc: number;
-  otherSpend: number;
   hysTransfer: number;
 };
 
 type PersistedState = {
+  monthsAhead: number;
   perMonth: Record<string, MonthInputs>;
   startOverflow: number;
   startHys: number;
-  monthsAhead: number;
   startUserOverride: boolean;
   lastAutoOverflow: number;
   lastAutoHys: number;
 };
 
-type Props = {
+type PlanGrid = {
+  headers: string[];
+  rows: any[][];
+};
+
+type SheetMap = {
+  ready: boolean;
+  monthColByKey: Record<string, number>;
+  incomeRow: number | null;
+  fixedRow: number | null;
+  discRow: number | null;
+  hysRow: number | null;
+};
+
+export type ForecastTabProps = {
   selectedMonth: Date | null;
-  onSelectMonth?: (m: Date) => void;
+  onSelectedMonthChange?: (m: Date) => void;
 
   baseFixed: number;
   baseDiscControlled: number;
@@ -34,9 +48,8 @@ type Props = {
   autoStartHys?: number | null;
 };
 
-const STORAGE_KEY = "forecast_inputs_v2";
-
-const JENNA_ANCHOR_PAY_DATE = new Date(2026, 1, 25);
+const STORAGE_KEY = "forecast_inputs_sheet_v1";
+const DEFAULT_MONTHS_AHEAD = 12;
 
 function clampFinite(n: number) {
   return Number.isFinite(n) ? n : 0;
@@ -46,152 +59,260 @@ function monthStart(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), 1);
 }
 
-function addDays(d: Date, days: number) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + days);
-  return x;
-}
-
 function addMonths(d: Date, months: number) {
   return new Date(d.getFullYear(), d.getMonth() + months, 1);
 }
 
-function endOfMonthExclusive(m0: Date) {
-  return new Date(m0.getFullYear(), m0.getMonth() + 1, 1);
+function countWeekdayInMonth(m0: Date, weekday: number) {
+  const y = m0.getFullYear();
+  const m = m0.getMonth();
+  const first = new Date(y, m, 1);
+  const last = new Date(y, m + 1, 0);
+  let count = 0;
+
+  for (let d = new Date(first); d <= last; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+    if (d.getDay() === weekday) count += 1;
+  }
+
+  return count;
 }
 
-function parseMoneyInput(v: string) {
-  const s = String(v || "").trim();
-  if (!s) return 0;
-  const neg = s.includes("(") || s.includes("-");
-  const num = Number(s.replace(/[^0-9.]/g, ""));
-  if (!Number.isFinite(num)) return 0;
-  return neg ? -num : num;
+function parseMonthCell(v: any): Date | null {
+  if (!v) return null;
+
+  if (v instanceof Date) {
+    return new Date(v.getFullYear(), v.getMonth(), 1);
+  }
+
+  const s = String(v).trim();
+  if (!s) return null;
+
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  }
+
+  return null;
 }
 
-function defaultState(): PersistedState {
+function safeNum(v: any) {
+  const n = Number(String(v ?? "").toString().replace(/[$,]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function loadState(): PersistedState {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return parsed as PersistedState;
+    }
+  } catch {}
+
   return {
+    monthsAhead: DEFAULT_MONTHS_AHEAD,
     perMonth: {},
     startOverflow: 0,
     startHys: 0,
-    monthsAhead: 12,
     startUserOverride: false,
     lastAutoOverflow: 0,
     lastAutoHys: 0
   };
 }
 
-function safeLoadState(): PersistedState {
-  const fallback = defaultState();
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return fallback;
-
-    const parsed = JSON.parse(raw);
-
-    const perMonth = (parsed?.perMonth || {}) as Record<string, MonthInputs>;
-    const startOverflow = clampFinite(Number(parsed?.startOverflow ?? 0));
-    const startHys = clampFinite(Number(parsed?.startHys ?? 0));
-
-    const monthsAheadRaw = clampFinite(Number(parsed?.monthsAhead ?? 12));
-    const monthsAhead = Math.max(3, Math.min(36, Math.floor(monthsAheadRaw || 12)));
-
-    const startUserOverride = Boolean(parsed?.startUserOverride ?? false);
-    const lastAutoOverflow = clampFinite(Number(parsed?.lastAutoOverflow ?? 0));
-    const lastAutoHys = clampFinite(Number(parsed?.lastAutoHys ?? 0));
-
-    return {
-      perMonth,
-      startOverflow,
-      startHys,
-      monthsAhead,
-      startUserOverride,
-      lastAutoOverflow,
-      lastAutoHys
-    };
-  } catch {
-    return fallback;
-  }
-}
-
-
-
-function saveState(next: {
-  perMonth: Record<string, MonthInputs>;
-  startOverflow: number;
-  startHys: number;
-  monthsAhead: number;
-  startUserOverride: boolean;
-  lastAutoOverflow: number;
-  lastAutoHys: number;
-}) {
+function saveState(next: PersistedState) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   } catch {}
 }
 
-function countWeekdayInMonth(m0: Date, weekday: number) {
-  const end = endOfMonthExclusive(m0);
-  let c = 0;
-  for (let d = new Date(m0); d.getTime() < end.getTime(); d = addDays(d, 1)) {
-    if (d.getDay() === weekday) c += 1;
-  }
-  return c;
+function labelMatch(label: string, want: string) {
+  return label.trim().toLowerCase() === want.trim().toLowerCase();
 }
 
-function countJennaPaychecksInMonth(m0: Date) {
-  const start = m0;
-  const end = endOfMonthExclusive(m0);
-
-  let d = new Date(JENNA_ANCHOR_PAY_DATE);
-
-  while (d.getTime() >= end.getTime()) d = addDays(d, -14);
-  while (d.getTime() < start.getTime()) d = addDays(d, 14);
-
-  let c = 0;
-  while (d.getTime() >= start.getTime() && d.getTime() < end.getTime()) {
-    c += 1;
-    d = addDays(d, 14);
+function findRowIndex(grid: PlanGrid, wantLabel: string): number | null {
+  const rows = Array.isArray(grid?.rows) ? grid.rows : [];
+  for (let i = 0; i < rows.length; i += 1) {
+    const label = String(rows[i]?.[0] ?? "");
+    if (labelMatch(label, wantLabel)) return i + 2;
   }
-  return c;
+  return null;
 }
 
-export default function ForecastTab(props: Props) {
-  const [state, setState] = useState<PersistedState>(() => safeLoadState());
+function buildSheetMap(grid: PlanGrid): SheetMap {
+  const rows = Array.isArray(grid?.rows) ? grid.rows : [];
 
-  const baseMonth = useMemo(() => {
-    const d = props.selectedMonth ? monthStart(props.selectedMonth) : monthStart(new Date());
-    return d;
-  }, [props.selectedMonth]);
+  let monthHeaderRowIndex: number | null = null;
+  let monthHeaderRow: any[] | null = null;
 
-  const baseIsCurrentMonth = useMemo(() => {
-    return isSameMonth(baseMonth, new Date());
-  }, [baseMonth]);
+  for (let i = 0; i < rows.length; i += 1) {
+    const label = String(rows[i]?.[0] ?? "");
+    if (labelMatch(label, "Month")) {
+      monthHeaderRowIndex = i + 2;
+      monthHeaderRow = rows[i] ?? null;
+      break;
+    }
+  }
 
-  const autoStart = useMemo(() => {
-    const o = props.autoStartOverflow;
-    const h = props.autoStartHys;
+  const monthColByKey: Record<string, number> = {};
 
-    const has = Number.isFinite(o as number) && Number.isFinite(h as number);
+  if (monthHeaderRowIndex && monthHeaderRow) {
+    for (let col = 2; col <= monthHeaderRow.length; col += 1) {
+      const cell = monthHeaderRow[col - 1];
+      const d = parseMonthCell(cell);
+      if (!d) continue;
+      monthColByKey[monthKey(d)] = col;
+    }
+  }
 
-    return {
-      has,
-      overflow: clampFinite(Number(o ?? 0)),
-      hys: clampFinite(Number(h ?? 0))
-    };
-  }, [props.autoStartOverflow, props.autoStartHys]);
+  const incomeRow = findRowIndex(grid, "FORECAST INCOME");
+  const fixedRow = findRowIndex(grid, "FORECAT FIXED") ?? findRowIndex(grid, "FORECAST FIXED");
+  const discRow = findRowIndex(grid, "FORECAST DES");
+  const hysRow = findRowIndex(grid, "FORECAST HYS");
+
+  return {
+    ready: Boolean(Object.keys(monthColByKey).length),
+    monthColByKey,
+    incomeRow,
+    fixedRow,
+    discRow,
+    hysRow
+  };
+}
+
+function readForecastInputsFromGrid(grid: PlanGrid, map: SheetMap): Record<string, MonthInputs> {
+  const out: Record<string, MonthInputs> = {};
+  const rows = Array.isArray(grid?.rows) ? grid.rows : [];
+
+  const byRow = (sheetRow: number | null) => {
+    if (!sheetRow) return null;
+    const idx = sheetRow - 2;
+    if (idx < 0 || idx >= rows.length) return null;
+    return rows[idx] ?? null;
+  };
+
+  const rIncome = byRow(map.incomeRow);
+  const rFixed = byRow(map.fixedRow);
+  const rDisc = byRow(map.discRow);
+  const rHys = byRow(map.hysRow);
+
+  for (const [mk, col] of Object.entries(map.monthColByKey)) {
+    const incomeAdd = safeNum(rIncome?.[col - 1]);
+    const addFixed = safeNum(rFixed?.[col - 1]);
+    const addDisc = safeNum(rDisc?.[col - 1]);
+    const hysTransfer = safeNum(rHys?.[col - 1]);
+
+    out[mk] = { incomeAdd, addFixed, addDisc, hysTransfer };
+  }
+
+  return out;
+}
+
+export default function ForecastTab(props: ForecastTabProps) {
+  const fallbackNow = useMemo(() => new Date(), []);
+  const effectiveMonth = props.selectedMonth ?? fallbackNow;
+  const baseMonth = useMemo(() => monthStart(effectiveMonth), [effectiveMonth]);
+
+  const [grid, setGrid] = useState<PlanGrid>({ headers: [], rows: [] });
+  const [sheetMap, setSheetMap] = useState<SheetMap>({
+    ready: false,
+    monthColByKey: {},
+    incomeRow: null,
+    fixedRow: null,
+    discRow: null,
+    hysRow: null
+  });
+
+  const [loadingSheet, setLoadingSheet] = useState(false);
+  const [sheetError, setSheetError] = useState("");
+
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [saveOkTick, setSaveOkTick] = useState(0);
+
+  const [state, setState] = useState<PersistedState>(() => loadState());
+
+  const lastLoadStampRef = useRef(0);
+
+  async function loadFromSheet() {
+    const stamp = Date.now();
+    lastLoadStampRef.current = stamp;
+
+    setLoadingSheet(true);
+    setSheetError("");
+
+    try {
+      const apiKey =
+        (process.env.REACT_APP_API_KEY as string | undefined) ||
+        (process.env.REACT_APP_APP_KEY as string | undefined) ||
+        "";
+
+      const res = await fetch(`/api/plan?cb=${Date.now()}`, {
+        cache: "no-store",
+        headers: apiKey ? { "x-app-key": apiKey } : undefined
+      });
+
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        throw new Error(`PLAN HTTP ${res.status}${msg ? ` ${msg}` : ""}`);
+      }
+
+      const data = await res.json();
+      const headers: string[] = Array.isArray(data?.headers) ? data.headers : [];
+      const rows: any[][] = Array.isArray(data?.rows) ? data.rows : [];
+
+      if (lastLoadStampRef.current !== stamp) return;
+
+      const nextGrid: PlanGrid = { headers, rows };
+      setGrid(nextGrid);
+
+      const nextMap = buildSheetMap(nextGrid);
+      setSheetMap(nextMap);
+
+      const sheetInputs = nextMap.ready ? readForecastInputsFromGrid(nextGrid, nextMap) : {};
+
+      const autoStart = {
+        overflow: Math.round(clampFinite(props.autoStartOverflow ?? 0)),
+        hys: Math.round(clampFinite(props.autoStartHys ?? 0))
+      };
+
+      setState((prev) => {
+        const mergedPerMonth = { ...(prev?.perMonth ?? {}), ...sheetInputs };
+
+        const next: PersistedState = {
+          ...(prev ?? loadState()),
+          perMonth: mergedPerMonth,
+          lastAutoOverflow: autoStart.overflow,
+          lastAutoHys: autoStart.hys,
+          startOverflow: prev?.startUserOverride ? prev.startOverflow : autoStart.overflow,
+          startHys: prev?.startUserOverride ? prev.startHys : autoStart.hys
+        };
+
+        saveState(next);
+        return next;
+      });
+    } catch (e: any) {
+      if (lastLoadStampRef.current !== stamp) return;
+      setSheetError(e?.message || String(e));
+    } finally {
+      if (lastLoadStampRef.current === stamp) setLoadingSheet(false);
+    }
+  }
 
   useEffect(() => {
-    if (!baseIsCurrentMonth) return;
-    if (!autoStart.has) return;
+    loadFromSheet();
+  }, []);
+
+  useEffect(() => {
+    const autoStart = {
+      overflow: Math.round(clampFinite(props.autoStartOverflow ?? 0)),
+      hys: Math.round(clampFinite(props.autoStartHys ?? 0))
+    };
+
+    if (!autoStart.overflow && !autoStart.hys) return;
 
     if (state.startUserOverride) return;
 
-    const alreadyApplied =
-      state.lastAutoOverflow === autoStart.overflow && state.lastAutoHys === autoStart.hys;
-
-    if (alreadyApplied) return;
-
     const next: PersistedState = {
       ...state,
       startOverflow: autoStart.overflow,
@@ -202,37 +323,12 @@ export default function ForecastTab(props: Props) {
 
     setState(next);
     saveState(next);
-  }, [
-    baseIsCurrentMonth,
-    autoStart.has,
-    autoStart.overflow,
-    autoStart.hys,
-    state.startUserOverride,
-    state.lastAutoOverflow,
-    state.lastAutoHys,
-    state
-  ]);
-
-  function applyAutoStart() {
-    if (!autoStart.has) return;
-
-    const next: PersistedState = {
-      ...state,
-      startOverflow: autoStart.overflow,
-      startHys: autoStart.hys,
-      startUserOverride: false,
-      lastAutoOverflow: autoStart.overflow,
-      lastAutoHys: autoStart.hys
-    };
-
-    setState(next);
-    saveState(next);
-  }
+  }, [props.autoStartOverflow, props.autoStartHys]);
 
   function setMonthsAhead(n: number) {
     const next: PersistedState = {
       ...state,
-      monthsAhead: Math.max(3, Math.min(36, Math.floor(clampFinite(n) || 12)))
+      monthsAhead: Math.max(3, Math.min(36, Math.floor(clampFinite(n) || DEFAULT_MONTHS_AHEAD)))
     };
     setState(next);
     saveState(next);
@@ -260,9 +356,9 @@ export default function ForecastTab(props: Props) {
 
   function setMonthField(mKey: string, field: keyof MonthInputs, value: number) {
     const cur: MonthInputs = state.perMonth[mKey] || {
+      incomeAdd: 0,
       addFixed: 0,
       addDisc: 0,
-      otherSpend: 0,
       hysTransfer: 0
     };
 
@@ -273,8 +369,77 @@ export default function ForecastTab(props: Props) {
     saveState(next);
   }
 
+  async function saveMonthToSheet(mKey: string) {
+    setSaveError("");
+
+    if (!sheetMap.ready) {
+      setSaveError("Sheet map not ready yet");
+      return;
+    }
+
+    const col = sheetMap.monthColByKey[mKey];
+    if (!col) {
+      setSaveError("Could not find month column in PLAN");
+      return;
+    }
+
+    const rowIncome = sheetMap.incomeRow;
+    const rowFixed = sheetMap.fixedRow;
+    const rowDisc = sheetMap.discRow;
+    const rowHys = sheetMap.hysRow;
+
+    if (!rowIncome || !rowFixed || !rowDisc || !rowHys) {
+      setSaveError("Could not find forecast rows in PLAN");
+      return;
+    }
+
+    const inputs: MonthInputs = state.perMonth[mKey] || {
+      incomeAdd: 0,
+      addFixed: 0,
+      addDisc: 0,
+      hysTransfer: 0
+    };
+
+    const updates = [
+      { row: rowIncome, col, value: clampFinite(inputs.incomeAdd) },
+      { row: rowFixed, col, value: clampFinite(inputs.addFixed) },
+      { row: rowDisc, col, value: clampFinite(inputs.addDisc) },
+      { row: rowHys, col, value: clampFinite(inputs.hysTransfer) }
+    ];
+
+    setSaving(true);
+
+    try {
+      const apiKey =
+        (process.env.REACT_APP_API_KEY as string | undefined) ||
+        (process.env.REACT_APP_APP_KEY as string | undefined) ||
+        "";
+
+      const res = await fetch(`/api/forecastWrite?cb=${Date.now()}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { "x-app-key": apiKey } : {})
+        },
+        body: JSON.stringify({ updates })
+      });
+
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        throw new Error(`WRITE HTTP ${res.status}${msg ? ` ${msg}` : ""}`);
+      }
+
+      setSaveOkTick(Date.now());
+      await loadFromSheet();
+    } catch (e: any) {
+      setSaveError(e?.message || String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const rows = useMemo(() => {
-    const monthsAhead = state.monthsAhead || 12;
+    const monthsAhead = state.monthsAhead || DEFAULT_MONTHS_AHEAD;
 
     const austinWeekly = clampFinite(props.austinWeekly);
     const jennaWeekly = clampFinite(props.jennaWeekly);
@@ -285,9 +450,9 @@ export default function ForecastTab(props: Props) {
     };
 
     const jennaPayPerMonth = (m0: Date) => {
-      const paychecks = countJennaPaychecksInMonth(m0);
-      const perPaycheck = jennaWeekly * 2;
-      return paychecks * perPaycheck;
+      const mondays = countWeekdayInMonth(m0, 1);
+      const paychecks = Math.ceil(mondays / 2);
+      return paychecks * jennaWeekly;
     };
 
     let runningOverflow = clampFinite(state.startOverflow);
@@ -297,8 +462,8 @@ export default function ForecastTab(props: Props) {
       month: Date;
       mKey: string;
 
-      incomeAustin: number;
-      incomeJenna: number;
+      incomeBase: number;
+      incomeAdd: number;
       incomeTotal: number;
 
       fixedBase: number;
@@ -309,7 +474,6 @@ export default function ForecastTab(props: Props) {
       discAdd: number;
       discTotal: number;
 
-      otherSpend: number;
       hysTransfer: number;
 
       monthOverflow: number;
@@ -322,15 +486,15 @@ export default function ForecastTab(props: Props) {
       const mk = monthKey(m0);
 
       const inputs = state.perMonth[mk] || {
+        incomeAdd: 0,
         addFixed: 0,
         addDisc: 0,
-        otherSpend: 0,
         hysTransfer: 0
       };
 
-      const incomeAustin = austinPayPerMonth(m0);
-      const incomeJenna = jennaPayPerMonth(m0);
-      const incomeTotal = incomeAustin + incomeJenna;
+      const incomeBase = austinPayPerMonth(m0) + jennaPayPerMonth(m0);
+      const incomeAdd = clampFinite(inputs.incomeAdd);
+      const incomeTotal = incomeBase + incomeAdd;
 
       const fixedBase = clampFinite(props.baseFixed);
       const fixedAdd = clampFinite(inputs.addFixed);
@@ -340,10 +504,9 @@ export default function ForecastTab(props: Props) {
       const discAdd = clampFinite(inputs.addDisc);
       const discTotal = discBase + discAdd;
 
-      const otherSpend = clampFinite(inputs.otherSpend);
       const hysTransfer = clampFinite(inputs.hysTransfer);
 
-      const monthOverflow = incomeTotal - fixedTotal - discTotal - otherSpend - hysTransfer;
+      const monthOverflow = incomeTotal - fixedTotal - discTotal - hysTransfer;
 
       runningOverflow += monthOverflow;
       runningHys += hysTransfer;
@@ -351,8 +514,8 @@ export default function ForecastTab(props: Props) {
       out.push({
         month: m0,
         mKey: mk,
-        incomeAustin,
-        incomeJenna,
+        incomeBase,
+        incomeAdd,
         incomeTotal,
         fixedBase,
         fixedAdd,
@@ -360,7 +523,6 @@ export default function ForecastTab(props: Props) {
         discBase,
         discAdd,
         discTotal,
-        otherSpend,
         hysTransfer,
         monthOverflow,
         endOverflow: runningOverflow,
@@ -372,493 +534,215 @@ export default function ForecastTab(props: Props) {
   }, [
     baseMonth,
     props.austinWeekly,
+    props.jennaWeekly,
     props.baseDiscControlled,
     props.baseFixed,
-    props.jennaWeekly,
     state.monthsAhead,
     state.perMonth,
-    state.startHys,
-    state.startOverflow
+    state.startOverflow,
+    state.startHys
   ]);
 
-  const showAutoStartButton = useMemo(() => {
-    if (!autoStart.has) return false;
-    const diff =
-      Math.round(clampFinite(state.startOverflow)) !== Math.round(autoStart.overflow) ||
-      Math.round(clampFinite(state.startHys)) !== Math.round(autoStart.hys);
-    return diff;
-  }, [autoStart.has, autoStart.overflow, autoStart.hys, state.startOverflow, state.startHys]);
-
   return (
-    <main>
-      <div
-        style={{
-          display: "flex",
-          gap: 12,
-          flexWrap: "wrap",
-          alignItems: "stretch",
-          marginBottom: 14
-        }}
-      >
+    <div style={{ padding: 16 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>Forecast</div>
+          <div style={{ opacity: 0.75, marginTop: 4 }}>
+            Inputs are stored in your PLAN tab rows for Income, Fixed, Des, and HYS.
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            onClick={() => loadFromSheet()}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid var(--border)",
+              background: "var(--card)",
+              cursor: "pointer"
+            }}
+            disabled={loadingSheet || saving}
+          >
+            {loadingSheet ? "Loading" : "Reload from sheet"}
+          </button>
+
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>Months ahead</div>
+            <input
+              value={state.monthsAhead}
+              onChange={(e) => setMonthsAhead(Number(e.target.value))}
+              type="number"
+              style={{ width: 110, padding: "8px 10px", borderRadius: 10, border: "1px solid var(--border)" }}
+            />
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>Start overflow</div>
+            <input
+              value={state.startOverflow}
+              onChange={(e) => setStartOverflow(Number(e.target.value))}
+              type="number"
+              style={{ width: 140, padding: "8px 10px", borderRadius: 10, border: "1px solid var(--border)" }}
+            />
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>Start HYS</div>
+            <input
+              value={state.startHys}
+              onChange={(e) => setStartHys(Number(e.target.value))}
+              type="number"
+              style={{ width: 140, padding: "8px 10px", borderRadius: 10, border: "1px solid var(--border)" }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {sheetError ? (
+        <div style={{ marginTop: 12, padding: 10, borderRadius: 12, border: "1px solid var(--border)", background: "rgba(255,0,0,0.06)" }}>
+          Could not load PLAN
+          <br />
+          <small style={{ opacity: 0.8 }}>{sheetError}</small>
+        </div>
+      ) : null}
+
+      {!sheetMap.ready ? (
+        <div style={{ marginTop: 12, padding: 10, borderRadius: 12, border: "1px solid var(--border)", background: "rgba(0,0,0,0.03)" }}>
+          Sheet mapping not ready yet. Make sure your PLAN tab includes the Month row and the forecast rows.
+        </div>
+      ) : null}
+
+      <div style={{ marginTop: 14, borderRadius: 14, border: "1px solid var(--border)", overflow: "hidden" }}>
         <div
           style={{
-            flex: "2 1 360px",
-            background: "white",
-            border: "1px solid var(--border)",
-            borderRadius: 14,
-            padding: "14px 16px"
+            display: "flex",
+            gap: 10,
+            padding: "10px 12px",
+            background: "rgba(0,0,0,0.03)",
+            fontWeight: 700,
+            fontSize: 13
           }}
         >
-          <div
-            style={{
-              fontFamily: "DM Serif Display, serif",
-              fontSize: 22,
-              marginBottom: 6
-            }}
-          >
-            Forecast
-          </div>
-          <div
-            style={{
-              fontSize: 12,
-              color: "var(--warm-gray)",
-              lineHeight: 1.35
-            }}
-          >
-            Austin income counts Thursdays in the month. Jenna income counts biweekly paychecks
-            anchored to 2/25/2026.
-          </div>
+          <div style={{ width: 110 }}>Month</div>
+          <div style={{ flex: "1 1 120px" }}>Income base</div>
+          <div style={{ flex: "1 1 120px" }}>Income add</div>
+          <div style={{ flex: "1 1 120px" }}>Fixed add</div>
+          <div style={{ flex: "1 1 140px" }}>Controlled disc add</div>
+          <div style={{ flex: "1 1 120px" }}>HYS</div>
+          <div style={{ flex: "1 1 140px" }}>Overflow</div>
+          <div style={{ flex: "1 1 160px" }}>End overflow</div>
+          <div style={{ width: 110 }}>Save</div>
+        </div>
 
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              flexWrap: "wrap",
-              marginTop: 12
-            }}
-          >
-            <div style={{ flex: "1 1 160px" }}>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: "var(--warm-gray)",
-                  fontWeight: 700,
-                  letterSpacing: 0.8,
-                  textTransform: "uppercase"
-                }}
-              >
-                Start overflow balance
+        {rows.map((r) => {
+          const isSelected = isSameMonth(r.month, effectiveMonth);
+          const input = state.perMonth[r.mKey] || { incomeAdd: 0, addFixed: 0, addDisc: 0, hysTransfer: 0 };
+
+          return (
+            <div
+              key={r.mKey}
+              style={{
+                display: "flex",
+                gap: 10,
+                padding: "10px 12px",
+                borderTop: "1px solid var(--border)",
+                background: isSelected ? "rgba(139,173,205,0.12)" : "transparent",
+                alignItems: "center"
+              }}
+              onClick={() => props.onSelectedMonthChange && props.onSelectedMonthChange(r.month)}
+            >
+              <div style={{ width: 110, fontWeight: 700 }}>{monthLabel(r.month)}</div>
+
+              <div style={{ flex: "1 1 120px" }}>{fmtMoney0(r.incomeBase)}</div>
+
+              <div style={{ flex: "1 1 120px" }}>
+                <input
+                  value={input.incomeAdd}
+                  onChange={(e) => setMonthField(r.mKey, "incomeAdd", Number(e.target.value))}
+                  onBlur={() => saveMonthToSheet(r.mKey)}
+                  type="number"
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid var(--border)" }}
+                />
               </div>
-              <input
-                value={fmtMoney0(state.startOverflow)}
-                onChange={(e) => setStartOverflow(parseMoneyInput(e.target.value))}
-                style={{
-                  width: "100%",
-                  marginTop: 6,
-                  padding: "10px 10px",
-                  borderRadius: 10,
-                  border: "1px solid var(--border)",
-                  background: "var(--cream)",
-                  fontSize: 13,
-                  fontFamily: "inherit"
-                }}
-              />
-            </div>
 
-            <div style={{ flex: "1 1 160px" }}>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: "var(--warm-gray)",
-                  fontWeight: 700,
-                  letterSpacing: 0.8,
-                  textTransform: "uppercase"
-                }}
-              >
-                Start HYS balance
+              <div style={{ flex: "1 1 120px" }}>
+                <input
+                  value={input.addFixed}
+                  onChange={(e) => setMonthField(r.mKey, "addFixed", Number(e.target.value))}
+                  onBlur={() => saveMonthToSheet(r.mKey)}
+                  type="number"
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid var(--border)" }}
+                />
               </div>
-              <input
-                value={fmtMoney0(state.startHys)}
-                onChange={(e) => setStartHys(parseMoneyInput(e.target.value))}
-                style={{
-                  width: "100%",
-                  marginTop: 6,
-                  padding: "10px 10px",
-                  borderRadius: 10,
-                  border: "1px solid var(--border)",
-                  background: "var(--cream)",
-                  fontSize: 13,
-                  fontFamily: "inherit"
-                }}
-              />
-            </div>
 
-            <div style={{ flex: "1 1 140px" }}>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: "var(--warm-gray)",
-                  fontWeight: 700,
-                  letterSpacing: 0.8,
-                  textTransform: "uppercase"
-                }}
-              >
-                Months
+              <div style={{ flex: "1 1 140px" }}>
+                <input
+                  value={input.addDisc}
+                  onChange={(e) => setMonthField(r.mKey, "addDisc", Number(e.target.value))}
+                  onBlur={() => saveMonthToSheet(r.mKey)}
+                  type="number"
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid var(--border)" }}
+                />
               </div>
-              <select
-                value={state.monthsAhead}
-                onChange={(e) => setMonthsAhead(Number(e.target.value))}
-                style={{
-                  width: "100%",
-                  marginTop: 6,
-                  padding: "10px 10px",
-                  borderRadius: 10,
-                  border: "1px solid var(--border)",
-                  background: "var(--cream)",
-                  fontSize: 13,
-                  fontFamily: "inherit"
-                }}
-              >
-                {[6, 9, 12, 18, 24, 36].map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
-            </div>
 
-            {showAutoStartButton ? (
-              <div style={{ flex: "1 1 160px", alignSelf: "end" }}>
+              <div style={{ flex: "1 1 120px" }}>
+                <input
+                  value={input.hysTransfer}
+                  onChange={(e) => setMonthField(r.mKey, "hysTransfer", Number(e.target.value))}
+                  onBlur={() => saveMonthToSheet(r.mKey)}
+                  type="number"
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid var(--border)" }}
+                />
+              </div>
+
+              <div style={{ flex: "1 1 140px", fontWeight: 700 }}>{fmtMoney0(r.monthOverflow)}</div>
+              <div style={{ flex: "1 1 160px", fontWeight: 700 }}>{fmtMoney0(r.endOverflow)}</div>
+
+              <div style={{ width: 110 }}>
                 <button
-                  type="button"
-                  onClick={applyAutoStart}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    saveMonthToSheet(r.mKey);
+                  }}
                   style={{
                     width: "100%",
-                    marginTop: 6,
-                    padding: "10px 10px",
+                    padding: "8px 10px",
                     borderRadius: 10,
                     border: "1px solid var(--border)",
-                    background: "white",
-                    fontSize: 12,
-                    fontFamily: "inherit",
-                    cursor: "pointer",
-                    fontWeight: 800
+                    background: "var(--card)",
+                    cursor: "pointer"
                   }}
+                  disabled={saving || loadingSheet}
                 >
-                  Apply Plan balances
+                  Save
                 </button>
               </div>
-            ) : null}
-          </div>
-        </div>
-
-        <div
-          style={{
-            flex: "1 1 240px",
-            background: "white",
-            border: "1px solid var(--border)",
-            borderRadius: 14,
-            padding: "14px 16px"
-          }}
-        >
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--warm-gray)",
-              fontWeight: 700,
-              letterSpacing: 1,
-              textTransform: "uppercase"
-            }}
-          >
-            Base budgets
-          </div>
-          <div
-            style={{
-              marginTop: 8,
-              display: "flex",
-              flexDirection: "column",
-              gap: 8
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-              <div style={{ fontSize: 12, color: "var(--warm-gray)" }}>Fixed</div>
-              <div style={{ fontSize: 14, fontWeight: 900 }}>{fmtMoney0(props.baseFixed)}</div>
             </div>
-
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-              <div style={{ fontSize: 12, color: "var(--warm-gray)" }}>
-                Controlled discretionary
-              </div>
-              <div style={{ fontSize: 14, fontWeight: 900 }}>
-                {fmtMoney0(props.baseDiscControlled)}
-              </div>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-              <div style={{ fontSize: 12, color: "var(--warm-gray)" }}>Austin weekly</div>
-              <div style={{ fontSize: 14, fontWeight: 900 }}>
-                {fmtMoney0(props.austinWeekly || 0)}
-              </div>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-              <div style={{ fontSize: 12, color: "var(--warm-gray)" }}>Jenna weekly</div>
-              <div style={{ fontSize: 14, fontWeight: 900 }}>
-                {fmtMoney0(props.jennaWeekly || 0)}
-              </div>
-            </div>
-          </div>
-        </div>
+          );
+        })}
       </div>
 
-      <div className="transactions-wrap" style={{ overflow: "hidden" }}>
-        <div className="transactions-header">
-          <div className="transactions-title">Monthly projection</div>
+      {saveError ? (
+        <div style={{ marginTop: 12, padding: 10, borderRadius: 12, border: "1px solid var(--border)", background: "rgba(255,0,0,0.06)" }}>
+          Could not save
+          <br />
+          <small style={{ opacity: 0.8 }}>{saveError}</small>
         </div>
+      ) : null}
 
-        <div style={{ padding: 14 }}>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 10,
-              padding: "10px 12px",
-              borderRadius: 12,
-              background: "var(--cream)",
-              border: "1px solid var(--border)",
-              fontSize: 11,
-              color: "var(--warm-gray)",
-              fontWeight: 700,
-              letterSpacing: 0.6,
-              textTransform: "uppercase"
-            }}
-          >
-            <div style={{ flex: "0 0 150px" }}>Month</div>
-            <div style={{ flex: "1 1 120px" }}>Income</div>
-            <div style={{ flex: "1 1 120px" }}>Fixed</div>
-            <div style={{ flex: "1 1 140px" }}>Controlled disc</div>
-            <div style={{ flex: "1 1 120px" }}>Other</div>
-            <div style={{ flex: "1 1 120px" }}>HYS</div>
-            <div style={{ flex: "1 1 140px" }}>Overflow</div>
-            <div style={{ flex: "1 1 160px" }}>End overflow</div>
-            <div style={{ flex: "1 1 160px" }}>End HYS</div>
-          </div>
+      {saving ? (
+        <div style={{ marginTop: 10, opacity: 0.75 }}>Saving to Google Sheet</div>
+      ) : saveOkTick ? (
+        <div style={{ marginTop: 10, opacity: 0.75 }}>Saved and reloaded</div>
+      ) : null}
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
-            {rows.map((r) => {
-              const isSelected = props.selectedMonth ? isSameMonth(r.month, props.selectedMonth) : false;
-
-              const overflowColor = r.monthOverflow >= 0 ? "#166534" : "#991B1B";
-              const endOverflowColor = r.endOverflow >= 0 ? "#166534" : "#991B1B";
-
-              return (
-                <div
-                  key={r.mKey}
-                  style={{
-                    border: "1px solid var(--border)",
-                    borderRadius: 14,
-                    overflow: "hidden",
-                    background: "white",
-                    outline: isSelected ? "2px solid rgba(99,102,241,0.35)" : "none",
-                    outlineOffset: 0
-                  }}
-                >
-                  <div
-                    style={{
-                      padding: "12px 12px",
-                      display: "flex",
-                      flexWrap: "wrap",
-                      alignItems: "center",
-                      gap: 10
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => props.onSelectMonth?.(r.month)}
-                      title="Set selected month"
-                      style={{
-                        flex: "0 0 150px",
-                        textAlign: "left",
-                        background: "none",
-                        border: "none",
-                        padding: 0,
-                        cursor: props.onSelectMonth ? "pointer" : "default",
-                        fontFamily: "DM Serif Display, serif",
-                        fontSize: 16,
-                        color: "var(--ink)"
-                      }}
-                    >
-                      {monthLabel(r.month)}
-                    </button>
-
-                    <div
-                      style={{
-                        flex: "1 1 120px",
-                        fontWeight: 900,
-                        color: "#166534",
-                        fontVariantNumeric: "tabular-nums"
-                      }}
-                    >
-                      {fmtMoney0(r.incomeTotal)}
-                      <div
-                        style={{
-                          fontSize: 10,
-                          color: "var(--warm-gray)",
-                          fontWeight: 600,
-                          marginTop: 2
-                        }}
-                      >
-                        Austin {fmtMoney0(r.incomeAustin)} · Jenna {fmtMoney0(r.incomeJenna)}
-                      </div>
-                    </div>
-
-                    <div style={{ flex: "1 1 120px", fontVariantNumeric: "tabular-nums" }}>
-                      <div style={{ fontWeight: 900 }}>{fmtMoney0(r.fixedTotal)}</div>
-                      <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
-                        <span style={{ fontSize: 10, color: "var(--warm-gray)", fontWeight: 700 }}>
-                          Add
-                        </span>
-                        <input
-                          value={String(state.perMonth[r.mKey]?.addFixed ?? 0)}
-                          onChange={(e) =>
-                            setMonthField(r.mKey, "addFixed", parseMoneyInput(e.target.value))
-                          }
-                          style={{
-                            width: 90,
-                            padding: "8px 10px",
-                            borderRadius: 10,
-                            border: "1px solid var(--border)",
-                            background: "var(--cream)",
-                            fontSize: 12,
-                            fontFamily: "inherit"
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    <div style={{ flex: "1 1 140px", fontVariantNumeric: "tabular-nums" }}>
-                      <div style={{ fontWeight: 900 }}>{fmtMoney0(r.discTotal)}</div>
-                      <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
-                        <span style={{ fontSize: 10, color: "var(--warm-gray)", fontWeight: 700 }}>
-                          Add
-                        </span>
-                        <input
-                          value={String(state.perMonth[r.mKey]?.addDisc ?? 0)}
-                          onChange={(e) =>
-                            setMonthField(r.mKey, "addDisc", parseMoneyInput(e.target.value))
-                          }
-                          style={{
-                            width: 90,
-                            padding: "8px 10px",
-                            borderRadius: 10,
-                            border: "1px solid var(--border)",
-                            background: "var(--cream)",
-                            fontSize: 12,
-                            fontFamily: "inherit"
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    <div style={{ flex: "1 1 120px", fontVariantNumeric: "tabular-nums" }}>
-                      <div style={{ fontWeight: 900 }}>{fmtMoney0(r.otherSpend)}</div>
-                      <div style={{ marginTop: 6 }}>
-                        <input
-                          value={String(state.perMonth[r.mKey]?.otherSpend ?? 0)}
-                          onChange={(e) =>
-                            setMonthField(r.mKey, "otherSpend", parseMoneyInput(e.target.value))
-                          }
-                          style={{
-                            width: 110,
-                            padding: "8px 10px",
-                            borderRadius: 10,
-                            border: "1px solid var(--border)",
-                            background: "var(--cream)",
-                            fontSize: 12,
-                            fontFamily: "inherit"
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    <div style={{ flex: "1 1 120px", fontVariantNumeric: "tabular-nums" }}>
-                      <div style={{ fontWeight: 900 }}>{fmtMoney0(r.hysTransfer)}</div>
-                      <div style={{ marginTop: 6 }}>
-                        <input
-                          value={String(state.perMonth[r.mKey]?.hysTransfer ?? 0)}
-                          onChange={(e) =>
-                            setMonthField(r.mKey, "hysTransfer", parseMoneyInput(e.target.value))
-                          }
-                          style={{
-                            width: 110,
-                            padding: "8px 10px",
-                            borderRadius: 10,
-                            border: "1px solid var(--border)",
-                            background: "var(--cream)",
-                            fontSize: 12,
-                            fontFamily: "inherit"
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    <div style={{ flex: "1 1 140px", fontVariantNumeric: "tabular-nums" }}>
-                      <div
-                        style={{
-                          fontFamily: "DM Serif Display, serif",
-                          fontSize: 20,
-                          color: overflowColor
-                        }}
-                      >
-                        {r.monthOverflow >= 0 ? "+" : ""}
-                        {fmtMoney0(r.monthOverflow)}
-                      </div>
-                      <div style={{ fontSize: 10, color: "var(--warm-gray)", fontWeight: 600, marginTop: 2 }}>
-                        This month
-                      </div>
-                    </div>
-
-                    <div style={{ flex: "1 1 160px", fontVariantNumeric: "tabular-nums" }}>
-                      <div style={{ fontWeight: 900, color: endOverflowColor }}>
-                        {fmtMoney0(r.endOverflow)}
-                      </div>
-                      <div style={{ fontSize: 10, color: "var(--warm-gray)", fontWeight: 600, marginTop: 2 }}>
-                        Ending overflow
-                      </div>
-                    </div>
-
-                    <div style={{ flex: "1 1 160px", fontVariantNumeric: "tabular-nums" }}>
-                      <div style={{ fontWeight: 900, color: "#166534" }}>{fmtMoney0(r.endHys)}</div>
-                      <div style={{ fontSize: 10, color: "var(--warm-gray)", fontWeight: 600, marginTop: 2 }}>
-                        Ending HYS
-                      </div>
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      borderTop: "1px solid var(--border)",
-                      background: "rgba(0,0,0,0.018)",
-                      padding: "10px 12px",
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: 14,
-                      alignItems: "center",
-                      color: "var(--warm-gray)",
-                      fontSize: 11
-                    }}
-                  >
-                    <span>
-                      Fixed base {fmtMoney0(r.fixedBase)} · Disc base {fmtMoney0(r.discBase)}
-                    </span>
-                    <span>Inputs saved automatically</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+      <div style={{ marginTop: 18, opacity: 0.75, fontSize: 12 }}>
+        Sheet mapping
+        <br />
+        Income row {sheetMap.incomeRow ?? "missing"} Fixed row {sheetMap.fixedRow ?? "missing"} Des row {sheetMap.discRow ?? "missing"} HYS row {sheetMap.hysRow ?? "missing"}
       </div>
-    </main>
+    </div>
   );
 }
