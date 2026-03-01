@@ -25,26 +25,28 @@ export function useTransactions() {
       setErr("");
 
       try {
-const res = await fetch("/api/transactions", {
-  cache: "no-store",
-  headers: API_APP_KEY ? { "x-app-key": API_APP_KEY } : undefined,
-});
+        const res = await fetch("/api/transactions", {
+          cache: "no-store",
+          headers: API_APP_KEY ? { "x-app-key": API_APP_KEY } : undefined,
+        });
 
-if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-const json = await res.json();
-if (json?.error) throw new Error(json.error);
+        const json = await res.json();
+        if (json?.error) throw new Error(json.error);
 
-const headers: string[] = json.headers || [];
-const rawRows: any[] = json.rows || [];
+        const headers: string[] = json.headers || [];
+        const rawRows: any[] = json.rows || [];
 
-const rows = rawRows.map((r: any[]) => {
-  const obj: any = {};
-  for (let i = 0; i < headers.length; i += 1) obj[headers[i]] = r[i];
-  return obj;
-});
-console.log("TX headers", headers);
-console.log("TX first row", rawRows?.[0]);
+        const rows = rawRows.map((r: any[]) => {
+          const obj: any = {};
+          for (let i = 0; i < headers.length; i += 1) obj[headers[i]] = r[i];
+          return obj;
+        });
+
+        console.log("TX headers", headers);
+        console.log("TX first row", rawRows?.[0]);
+
         const mapped = rows
           .map((r: any) => {
             const date = parseDate(pick(r, ["Date"]));
@@ -96,17 +98,32 @@ console.log("TX first row", rawRows?.[0]);
           );
         }
 
-        const monthList = Array.from(monthMap.values())
+        let monthList = Array.from(monthMap.values())
           .filter((m) => m >= TABLE_START)
           .sort((a, b) => a.getTime() - b.getTime());
 
-        const def = monthList.length
-          ? monthList[monthList.length - 1]
-          : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+        // Always include the current month even if there are 0 transactions yet
+        const now = new Date();
+        const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        if (currentMonth >= TABLE_START) {
+          const hasCurrent = monthList.some((m) => m.getTime() === currentMonth.getTime());
+          if (!hasCurrent) {
+            monthList = monthList.concat([currentMonth]).sort((a, b) => a.getTime() - b.getTime());
+          }
+        }
+
+        // Default selection should be the current month
+        const def =
+          currentMonth >= TABLE_START
+            ? currentMonth
+            : monthList.length
+            ? monthList[monthList.length - 1]
+            : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
         if (!alive) return;
         setTx(deduped);
-        setMonths(monthList);
+        setMonths(monthList.length ? monthList : currentMonth >= TABLE_START ? [currentMonth] : []);
         setSelectedMonth(def);
       } catch (e: any) {
         if (!alive) return;
