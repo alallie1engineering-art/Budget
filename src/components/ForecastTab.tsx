@@ -114,7 +114,7 @@ function buildSheetMap(grid: PlanGrid): SheetMap {
   }
   const monthColByKey: Record<string, number> = {};
   if (monthHeaderRow) {
-    for (let col = 2; col <= monthHeaderRow.length; col++) {
+    for (let col = 1; col <= monthHeaderRow.length; col++) {
       const d = parseMonthCell(monthHeaderRow[col - 1]);
       if (d) monthColByKey[monthKey(d)] = col;
     }

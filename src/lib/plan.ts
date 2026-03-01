@@ -46,6 +46,15 @@ function parsePlanMonthValue(v: any): Date | null {
   const s = safeTrim(v);
   if (!s) return null;
 
+  // Google Sheets serial number (UNFORMATTED_VALUE for date cells)
+  // Serial: days since Dec 30, 1899
+  const num = Number(s);
+  if (Number.isFinite(num) && num > 1000) {
+    const ms = (num - 25569) * 86400 * 1000;
+    const d = new Date(ms);
+    if (!Number.isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), 1);
+  }
+
   const d = parseDate(s);
   if (d) return new Date(d.getFullYear(), d.getMonth(), 1);
 
@@ -54,6 +63,10 @@ function parsePlanMonthValue(v: any): Date | null {
     return new Date(g.getFullYear(), g.getMonth(), 1);
 
   return null;
+}
+
+function formatMonthLabel(d: Date): string {
+  return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
 function parseCsvToGrid(csvText: string): string[][] {
@@ -215,8 +228,9 @@ export function parsePlanFromCsvText(csvText: string): PlanData {
 
   const get = (label: string) => safeTrim(findLabelNext(grid, label));
 
-  out.planMonthRaw = get("MONTH");
-  out.planMonthDate = parsePlanMonthValue(out.planMonthRaw);
+  const rawMonthVal = get("MONTH");
+  out.planMonthDate = parsePlanMonthValue(rawMonthVal);
+  out.planMonthRaw = out.planMonthDate ? formatMonthLabel(out.planMonthDate) : rawMonthVal;
 
   // Starting balances from bottom section
   // Your sheet uses labels like "HYS Account Savings" and "Overflow"

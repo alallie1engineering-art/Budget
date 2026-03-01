@@ -27,6 +27,7 @@ export type HistoryRow =
       discSpend: number;
       savingsTransfer: number;
       overflow: number;
+      actualOverflow?: number | null;
     }
   | {
       kind: "year";
@@ -36,5 +37,6 @@ export type HistoryRow =
       discSpend: number;
       savingsTransfer: number;
       overflow: number;
+      actualOverflow?: number | null;
     }
   | { kind: "spacer"; id: string };

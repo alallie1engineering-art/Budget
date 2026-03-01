@@ -304,6 +304,82 @@ const {
 
 const { plan, hasPlan, refreshPlan } = usePlan()
 
+// Actual overflow map: keyed by "YYYY-MM", loaded from PLAN sheet Actual Overflow row
+const [actualOverflowMap, setActualOverflowMap] = useState<Record<string, number>>({});
+const [actualOverflowRow, setActualOverflowRow] = useState<number | null>(null);
+const [actualOverflowColMap, setActualOverflowColMap] = useState<Record<string, number>>({});
+const [actualOverflowDrafts, setActualOverflowDrafts] = useState<Record<string, string>>({});
+
+// Load actual overflow data from plan grid
+useEffect(() => {
+  async function loadActualOverflow() {
+    try {
+      const apiKey = (process.env.REACT_APP_API_KEY as string | undefined) || (process.env.REACT_APP_APP_KEY as string | undefined) || "";
+      const res = await fetch(`/api/plan?cb=${Date.now()}`, { cache: "no-store", headers: apiKey ? { "x-app-key": apiKey } : undefined });
+      if (!res.ok) return;
+      const data = await res.json();
+      const rows: any[][] = Array.isArray(data?.rows) ? data.rows : [];
+
+      // Find Month header row and Actual Overflow row
+      let monthRow: any[] | null = null;
+      let aoRowIndex: number | null = null;
+
+      for (let i = 0; i < rows.length; i++) {
+        const label = String(rows[i]?.[0] ?? "").trim().toLowerCase();
+        if (label === "month") monthRow = rows[i];
+        if (label === "actual overflow") aoRowIndex = i;
+      }
+
+      if (!monthRow || aoRowIndex === null) return;
+
+      // Build col map: monthKey -> 1-based col index
+      const colMap: Record<string, number> = {};
+      for (let col = 1; col <= monthRow.length; col++) {
+        const v = monthRow[col - 1];
+        const num = Number(v);
+        if (Number.isFinite(num) && num > 1000) {
+          const ms = (num - 25569) * 86400 * 1000;
+          const d = new Date(ms);
+          if (!isNaN(d.getTime())) {
+            colMap[monthKey(new Date(d.getFullYear(), d.getMonth(), 1))] = col;
+          }
+        } else if (v instanceof Date || (typeof v === "string" && v)) {
+          const d = new Date(v);
+          if (!isNaN(d.getTime())) colMap[monthKey(new Date(d.getFullYear(), d.getMonth(), 1))] = col;
+        }
+      }
+
+      // Build value map
+      const aoRow = rows[aoRowIndex];
+      const valueMap: Record<string, number> = {};
+      for (const [mk, col] of Object.entries(colMap)) {
+        const raw = aoRow[col - 1];
+        const n = Number(String(raw ?? "").replace(/[$,]/g, ""));
+        if (Number.isFinite(n)) valueMap[mk] = n;
+      }
+
+      setActualOverflowMap(valueMap);
+      setActualOverflowColMap(colMap);
+      setActualOverflowRow(aoRowIndex + 2); // +2 because rows is 0-indexed and starts after header
+    } catch {}
+  }
+  loadActualOverflow();
+}, []);
+
+async function saveActualOverflowValue(mk: string, value: number) {
+  const col = actualOverflowColMap[mk];
+  const row = actualOverflowRow;
+  if (!col || !row) return;
+  try {
+    const apiKey = (process.env.REACT_APP_API_KEY as string | undefined) || (process.env.REACT_APP_APP_KEY as string | undefined) || "";
+    await fetch(`/api/forecastWrite?cb=${Date.now()}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(apiKey ? { "x-app-key": apiKey } : {}) },
+      body: JSON.stringify({ updates: [{ row, col, value }] })
+    });
+  } catch {}
+}
+
 const [filter, setFilter] = useState<string>("all")
 const [showCount, setShowCount] = useState<number>(20)
 const [selectedFixedLine, setSelectedFixedLine] = useState<string>("")
@@ -650,36 +726,31 @@ const utilitiesLines = useMemo(() => {
     for (const r of prior) {
       const y = r.month.getFullYear();
       if (!byYear[y]) {
-        byYear[y] = {
-          income: 0,
-          fixedSpend: 0,
-          discSpend: 0,
-          savingsTransfer: 0,
-          overflow: 0,
-        };
+        byYear[y] = { income: 0, fixedSpend: 0, discSpend: 0, savingsTransfer: 0, overflow: 0, actualOverflow: 0 };
       }
       byYear[y].income += r.income;
       byYear[y].fixedSpend += r.fixedSpend;
       byYear[y].discSpend += r.discSpend;
       byYear[y].savingsTransfer += r.savingsTransfer;
       byYear[y].overflow += r.overflow;
+      const ao = actualOverflowMap[monthKey(r.month)];
+      if (ao != null) byYear[y].actualOverflow += ao;
     }
 
-    const years = Array.from(new Set(prior.map((r) => r.month.getFullYear()))).sort(
-      (a, b) => b - a
-    );
+    const years = Array.from(new Set(prior.map((r) => r.month.getFullYear()))).sort((a, b) => b - a);
 
     for (let i = 0; i < years.length; i++) {
       const year = years[i];
       if (i !== 0) rows.push({ kind: "spacer", id: `spacer-${year}` });
       rows.push({ kind: "year", year, ...byYear[year] });
       for (const r of prior.filter((x) => x.month.getFullYear() === year)) {
-        rows.push({ kind: "month", ...r });
+        const mk = monthKey(r.month);
+        rows.push({ kind: "month", ...r, actualOverflow: actualOverflowMap[mk] ?? null });
       }
     }
 
     return rows;
-  }, [overviewByMonthRaw, todayMonth]);
+  }, [overviewByMonthRaw, todayMonth, actualOverflowMap]);
 
   const historyChartData = useMemo(() => {
     return overviewByMonthRaw
@@ -1094,66 +1165,14 @@ const budgetIncome = isCurrentMonth
         <div className="header-top">
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div className="header-title">Family Budget</div>
+              <div className="header-title">{selectedMonth ? monthLabel(selectedMonth) : "Family Budget"}</div>
 
-              {plan.loaded ? (
-                <div
-                  title={
-                    plan.error
-                      ? plan.error
-                      : planMismatch
-                      ? `Plan is for ${plan.planMonthRaw}, not selected month`
-                      : `Plan: ${plan.planMonthRaw}`
-                  }
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 5,
-                    padding: "3px 8px",
-                    borderRadius: 99,
-                    background: plan.error ? "#FEE2E2" : planMismatch ? "#FEF3C7" : "#DCFCE7",
-                    border: `1px solid ${
-                      plan.error ? "#FCA5A5" : planMismatch ? "#FCD34D" : "#86EFAC"
-                    }`,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: plan.error ? "#991B1B" : planMismatch ? "#92400E" : "#166534",
-                    cursor: "default",
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: 99,
-                      background: plan.error ? "#EF4444" : planMismatch ? "#F59E0B" : "#22C55E",
-                      display: "inline-block",
-                    }}
-                  />
-                  {plan.error ? "Plan error" : `Plan: ${plan.planMonthRaw || "…"}`}
-                  {planMismatch ? " ⚠" : ""}
+              {plan.loaded && plan.error ? (
+                <div title={plan.error} style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 8px", borderRadius: 99, background: "#FEE2E2", border: "1px solid #FCA5A5", fontSize: 10, fontWeight: 700, color: "#991B1B", cursor: "default" }}>
+                  <span style={{ width: 6, height: 6, borderRadius: 99, background: "#EF4444", display: "inline-block" }} />
+                  Plan error
                 </div>
               ) : null}
-            </div>
-
-            <div
-              style={{
-                fontSize: 11,
-                opacity: 0.4,
-                letterSpacing: 1.2,
-                textTransform: "uppercase",
-                fontWeight: 600,
-              }}
-            >
-              {tab === "budget_overview"
-                ? "Budget Overview"
-                : tab === "history"
-                ? "History"
-                : tab === "budget"
-                ? "Discretionary"
-                : tab === "fixed"
-                ? "Fixed Spending"
-                : "Forecast"}
             </div>
           </div>
 
@@ -1698,7 +1717,7 @@ const budgetIncome = isCurrentMonth
                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead>
                       <tr style={{ textAlign: "left", opacity: 0.65 }}>
-                        {["Period", "Income", "Fixed", "Discretionary", "Savings", "Overflow"].map((h) => (
+                        {["Period", "Income", "Fixed", "Discretionary", "Savings", "Overflow", "Actual Moved"].map((h) => (
                           <th key={h} style={{ padding: "10px 14px", fontWeight: 800, fontSize: 12 }}>
                             {h}
                           </th>
@@ -1711,31 +1730,30 @@ const budgetIncome = isCurrentMonth
                         if (r.kind === "spacer") {
                           return (
                             <tr key={r.id}>
-                              <td colSpan={6} style={{ padding: 10 }} />
+                              <td colSpan={7} style={{ padding: 10 }} />
                             </tr>
                           );
                         }
 
                         if (r.kind === "year") {
                           return (
-                            <tr
-                              key={`yr-${r.year}`}
-                              style={{
-                                borderTop: "2px solid var(--border)",
-                                ...SUM_ROW,
-                              }}
-                            >
+                            <tr key={`yr-${r.year}`} style={{ borderTop: "2px solid var(--border)", ...SUM_ROW }}>
                               <td style={SUM_CELL}>{r.year} total</td>
                               <td style={{ ...SUM_CELL, color: "#166534" }}>{fmtMoney0(r.income)}</td>
                               <td style={{ ...SUM_CELL, color: "#991B1B" }}>{fmtMoney0(r.fixedSpend)}</td>
                               <td style={{ ...SUM_CELL, color: "#991B1B" }}>{fmtMoney0(r.discSpend)}</td>
                               <td style={{ ...SUM_CELL, color: "#166534" }}>{fmtMoney0(r.savingsTransfer)}</td>
-                              <td style={{ ...SUM_CELL, color: r.overflow >= 0 ? "#166534" : "#991B1B" }}>
-                                {fmtMoney0(r.overflow)}
+                              <td style={{ ...SUM_CELL, color: r.overflow >= 0 ? "#166534" : "#991B1B" }}>{fmtMoney0(r.overflow)}</td>
+                              <td style={{ ...SUM_CELL, color: r.actualOverflow != null && r.actualOverflow !== 0 ? (r.actualOverflow >= 0 ? "#166534" : "#991B1B") : "var(--warm-gray)" }}>
+                                {r.actualOverflow != null && r.actualOverflow !== 0 ? fmtMoney0(r.actualOverflow) : "—"}
                               </td>
                             </tr>
                           );
                         }
+
+                        const mk = monthKey(r.month);
+                        const draftVal = actualOverflowDrafts[mk];
+                        const displayVal = r.actualOverflow;
 
                         return (
                           <tr
@@ -1745,27 +1763,34 @@ const budgetIncome = isCurrentMonth
                             title="Open Budget Overview"
                           >
                             <td style={{ ...TD, fontWeight: 800 }}>{monthLabel(r.month)}</td>
-                            <td style={{ ...TD, color: "#166534", fontVariantNumeric: "tabular-nums" }}>
-                              {fmtMoney0(r.income)}
-                            </td>
-                            <td style={{ ...TD, color: "#991B1B", fontVariantNumeric: "tabular-nums" }}>
-                              {fmtMoney0(r.fixedSpend)}
-                            </td>
-                            <td style={{ ...TD, color: "#991B1B", fontVariantNumeric: "tabular-nums" }}>
-                              {fmtMoney0(r.discSpend)}
-                            </td>
-                            <td style={{ ...TD, color: "#166534", fontVariantNumeric: "tabular-nums" }}>
-                              {fmtMoney0(r.savingsTransfer)}
-                            </td>
-                            <td
-                              style={{
-                                ...TD,
-                                fontWeight: 900,
-                                fontVariantNumeric: "tabular-nums",
-                                color: r.overflow >= 0 ? "#166534" : "#991B1B",
-                              }}
-                            >
-                              {fmtMoney0(r.overflow)}
+                            <td style={{ ...TD, color: "#166534", fontVariantNumeric: "tabular-nums" }}>{fmtMoney0(r.income)}</td>
+                            <td style={{ ...TD, color: "#991B1B", fontVariantNumeric: "tabular-nums" }}>{fmtMoney0(r.fixedSpend)}</td>
+                            <td style={{ ...TD, color: "#991B1B", fontVariantNumeric: "tabular-nums" }}>{fmtMoney0(r.discSpend)}</td>
+                            <td style={{ ...TD, color: "#166534", fontVariantNumeric: "tabular-nums" }}>{fmtMoney0(r.savingsTransfer)}</td>
+                            <td style={{ ...TD, fontWeight: 900, fontVariantNumeric: "tabular-nums", color: r.overflow >= 0 ? "#166534" : "#991B1B" }}>{fmtMoney0(r.overflow)}</td>
+                            <td style={{ ...TD, fontVariantNumeric: "tabular-nums" }} onClick={e => e.stopPropagation()}>
+                              <input
+                                type="number"
+                                value={draftVal !== undefined ? draftVal : (displayVal !== null ? String(displayVal) : "")}
+                                placeholder="—"
+                                onChange={e => {
+                                  setActualOverflowDrafts(d => ({ ...d, [mk]: e.target.value }));
+                                  const n = parseFloat(e.target.value);
+                                  if (Number.isFinite(n)) setActualOverflowMap(m => ({ ...m, [mk]: n }));
+                                }}
+                                onBlur={() => {
+                                  setActualOverflowDrafts(d => { const next = { ...d }; delete next[mk]; return next; });
+                                  const val = actualOverflowMap[mk] ?? 0;
+                                  saveActualOverflowValue(mk, val);
+                                }}
+                                style={{
+                                  width: 90, padding: "4px 7px", borderRadius: 7,
+                                  border: "1px solid var(--border)", background: "var(--card)",
+                                  fontSize: 13, fontWeight: 700,
+                                  color: (actualOverflowMap[mk] ?? 0) >= 0 ? "#166534" : "#991B1B",
+                                  fontVariantNumeric: "tabular-nums",
+                                }}
+                              />
                             </td>
                           </tr>
                         );
