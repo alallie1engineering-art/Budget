@@ -100,9 +100,19 @@ function findRowIndex(grid: PlanGrid, label: string): number | null {
 
 function buildSheetMap(grid: PlanGrid): SheetMap {
   const rows = Array.isArray(grid?.rows) ? grid.rows : [];
+  const headers = Array.isArray(grid?.headers) ? grid.headers : [];
   let monthHeaderRow: any[] | null = null;
-  for (let i = 0; i < rows.length; i++) {
-    if (labelMatch(String(rows[i]?.[0] ?? ""), "Month")) { monthHeaderRow = rows[i]; break; }
+
+  // The API returns the first sheet row as `headers` and the rest as `rows`.
+  // Check headers first (the "Month" label row is usually row 0 = headers).
+  if (headers.length > 0 && labelMatch(String(headers[0] ?? ""), "Month")) {
+    monthHeaderRow = headers;
+  }
+  // Fall back to searching inside rows (in case layout differs)
+  if (!monthHeaderRow) {
+    for (let i = 0; i < rows.length; i++) {
+      if (labelMatch(String(rows[i]?.[0] ?? ""), "Month")) { monthHeaderRow = rows[i]; break; }
+    }
   }
   const monthColByKey: Record<string, number> = {};
   if (monthHeaderRow) {
