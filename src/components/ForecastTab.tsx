@@ -280,7 +280,7 @@ export default function ForecastTab(props: ForecastTabProps) {
     const austinWeekly = clampFinite(props.austinWeekly);
     const jennaWeekly = clampFinite(props.jennaWeekly);
     const austinPay = (m: Date) => countWeekdayInMonth(m, 4) * austinWeekly;
-    const jennaPay = (m: Date) => Math.ceil(countWeekdayInMonth(m, 1) / 2) * jennaWeekly;
+    const jennaPay = (m: Date) => Math.ceil(countWeekdayInMonth(m, 1) / 2) * jennaWeekly * 2;
     let runOverflow = clampFinite(state.startOverflow);
     let runHys = clampFinite(state.startHys);
     return Array.from({ length: monthsAhead }, (_, i) => {
