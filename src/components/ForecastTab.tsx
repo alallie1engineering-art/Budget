@@ -61,24 +61,16 @@ function countWeekdayInMonth(m0: Date, weekday: number) {
 
 function parseMonthCell(v: any): Date | null {
   if (!v && v !== 0) return null;
-
-  // Google Sheets serial number (UNFORMATTED_VALUE for date cells)
-  // Google serial: days since Dec 30, 1899
   if (typeof v === "number" && Number.isFinite(v) && v > 1000) {
-    const ms = (v - 25569) * 86400 * 1000; // convert to Unix ms (25569 = days between 1899-12-30 and 1970-01-01)
+    const ms = (v - 25569) * 86400 * 1000;
     const d = new Date(ms);
     if (!Number.isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), 1);
   }
-
   if (v instanceof Date) return new Date(v.getFullYear(), v.getMonth(), 1);
-
   const s = String(v).trim();
   if (!s) return null;
-
-  // Try ISO format first (most reliable)
   const iso = new Date(s);
   if (!Number.isNaN(iso.getTime())) return new Date(iso.getFullYear(), iso.getMonth(), 1);
-
   return null;
 }
 
@@ -236,14 +228,8 @@ export default function ForecastTab(props: ForecastTabProps) {
 
   async function saveMonthToSheet(mKey: string) {
     setSaveError("");
-    if (!sheetMap.ready) {
-      setSaveError("Sheet map not loaded yet — try Reload sheet");
-      return;
-    }
-    if (!sheetMap.monthColByKey[mKey]) {
-      setSaveError(`Month ${mKey} not found in sheet. Sheet may need a column for this month.`);
-      return;
-    }
+    if (!sheetMap.ready) { setSaveError("Sheet map not loaded yet — try Reload sheet"); return; }
+    if (!sheetMap.monthColByKey[mKey]) { return; } // month not in sheet yet — skip silently
     const col = sheetMap.monthColByKey[mKey];
     const { incomeRow, fixedRow, discRow, hysRow } = sheetMap;
     if (!incomeRow || !fixedRow || !discRow || !hysRow) {
@@ -298,40 +284,139 @@ export default function ForecastTab(props: ForecastTabProps) {
     });
   }, [baseMonth, props.austinWeekly, props.jennaWeekly, props.baseDiscControlled, props.baseFixed, state]);
 
-  const CAP: React.CSSProperties = { fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: 0.8, opacity: 0.45, marginBottom: 2 };
-  const CTRL: React.CSSProperties = { padding: "5px 8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--card)", fontSize: 12, width: "100%" };
+  const CAP: React.CSSProperties = {
+    fontSize: 10,
+    fontWeight: 700,
+    textTransform: "uppercase" as const,
+    letterSpacing: 1,
+    opacity: 0.4,
+    marginBottom: 3,
+  };
+
+  const CTRL: React.CSSProperties = {
+    padding: "7px 10px",
+    borderRadius: 8,
+    border: "1px solid var(--border)",
+    background: "var(--card)",
+    fontSize: 15,
+    width: "100%",
+    boxSizing: "border-box" as const,
+  };
 
   return (
-    <div style={{ padding: "14px 14px 100px" }}>
+    <div style={{ padding: "16px 16px 100px" }}>
+      <style>{`
+        .fc-header { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 18px; }
+        .fc-header-inputs { margin-left: auto; display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+
+        /* Stats row: all cells in one flex row that wraps gracefully */
+        .fc-stats {
+          display: flex;
+          align-items: stretch;
+          flex-wrap: wrap;
+        }
+
+        /* Month label */
+        .fc-month {
+          flex: 0 0 130px;
+          padding: 16px 14px;
+          display: flex;
+          align-items: center;
+          border-right: 1px solid var(--border);
+          border-bottom: 1px solid var(--border);
+        }
+
+        /* Generic stat cell */
+        .fc-cell {
+          flex: 1 1 110px;
+          min-width: 100px;
+          padding: 12px 14px;
+          border-right: 1px solid var(--border);
+          border-bottom: 1px solid var(--border);
+        }
+
+        /* Month overflow — wider */
+        .fc-cell-overflow {
+          flex: 1.6 1 140px;
+          min-width: 130px;
+        }
+
+        /* Running cell — no right border, wider */
+        .fc-cell-running {
+          flex: 1.4 1 130px;
+          min-width: 120px;
+          border-right: none;
+        }
+
+        /* Adjust row */
+        .fc-adjust {
+          display: flex;
+          align-items: flex-end;
+          flex-wrap: wrap;
+          gap: 10px;
+          padding: 12px 14px;
+          border-top: 1px solid var(--border);
+        }
+        .fc-adjust-lbl {
+          flex: 0 0 auto;
+          font-size: 11px;
+          font-weight: 600;
+          opacity: 0.3;
+          padding-bottom: 6px;
+          min-width: 44px;
+          align-self: flex-end;
+        }
+        .fc-adjust-field {
+          flex: 1 1 120px;
+          min-width: 100px;
+        }
+
+        /* ── Mobile: month label full-width, cells go 2-per-row ── */
+        @media (max-width: 620px) {
+          .fc-month {
+            flex: 0 0 100%;
+            border-right: none;
+          }
+          .fc-cell {
+            flex: 1 1 calc(50% - 1px);
+            min-width: calc(50% - 1px);
+          }
+          .fc-cell-running {
+            flex: 0 0 100%;
+            min-width: 100%;
+            border-right: none;
+          }
+        }
+      `}</style>
 
       {/* ── Controls ── */}
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 16 }}>
+      <div className="fc-header">
         <div style={{ flex: "0 0 auto" }}>
-          <div style={{ fontSize: 17, fontWeight: 800 }}>Forecast</div>
-          <div style={{ fontSize: 11, opacity: 0.45, marginTop: 1 }}>Auto-saves on blur · syncs to PLAN sheet</div>
+          <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.3 }}>Forecast</div>
+          <div style={{ fontSize: 12, opacity: 0.4, marginTop: 2 }}>Auto-saves on blur · syncs to PLAN sheet</div>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={CAP}>Months</div>
-            <input value={state.monthsAhead} onChange={e => setMonthsAhead(Number(e.target.value))} type="number" style={{ ...CTRL, width: 65 }} />
-          </div>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={CAP}>Start Overflow</div>
-            <input value={state.startOverflow} onChange={e => setStartOverflow(Number(e.target.value))} type="number" style={{ ...CTRL, width: 110 }} />
-          </div>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={CAP}>Start HYS</div>
-            <input value={state.startHys} onChange={e => setStartHys(Number(e.target.value))} type="number" style={{ ...CTRL, width: 110 }} />
-          </div>
-          <button onClick={() => loadFromSheet()} disabled={loadingSheet} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--card)", fontSize: 12, cursor: "pointer" }}>
+        <div className="fc-header-inputs">
+          {[
+            { label: "Months",         val: state.monthsAhead,   set: (v: number) => setMonthsAhead(v),    w: 72  },
+            { label: "Start Overflow", val: state.startOverflow, set: (v: number) => setStartOverflow(v),  w: 130 },
+            { label: "Start HYS",      val: state.startHys,      set: (v: number) => setStartHys(v),       w: 130 },
+          ].map(({ label, val, set, w }) => (
+            <div key={label} style={{ display: "flex", flexDirection: "column" }}>
+              <div style={CAP}>{label}</div>
+              <input value={val} onChange={e => set(Number(e.target.value))} type="number"
+                style={{ ...CTRL, width: w }} />
+            </div>
+          ))}
+          <button onClick={() => loadFromSheet()} disabled={loadingSheet}
+            style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--card)", fontSize: 14, cursor: "pointer", fontWeight: 600, alignSelf: "flex-end" }}>
             {loadingSheet ? "Loading…" : "↻ Reload"}
           </button>
         </div>
       </div>
 
-      {sheetError && <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 10, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", fontSize: 12 }}>{sheetError}</div>}
-      {saving && <div style={{ marginBottom: 8, fontSize: 11, opacity: 0.45 }}>Saving…</div>}
-      {saveError && <div style={{ marginBottom: 8, fontSize: 11, color: "#EF4444" }}>{saveError}</div>}
+      {sheetError && <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", fontSize: 13 }}>{sheetError}</div>}
+      {saving    && <div style={{ marginBottom: 8, fontSize: 12, opacity: 0.4 }}>Saving…</div>}
+      {saveError && <div style={{ marginBottom: 8, fontSize: 12, color: "#EF4444" }}>{saveError}</div>}
 
       {/* ── Month cards ── */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -340,8 +425,8 @@ export default function ForecastTab(props: ForecastTabProps) {
           const inp = state.perMonth[r.mKey] || { incomeAdd: 0, addFixed: 0, addDisc: 0, hysTransfer: 0 };
           const posColor = "#166534";
           const negColor = "#DC2626";
-          const ovColor = r.monthOverflow >= 0 ? posColor : negColor;
-          const runColor = r.endOverflow >= 0 ? posColor : negColor;
+          const ovColor  = r.monthOverflow >= 0 ? posColor : negColor;
+          const runColor = r.endOverflow   >= 0 ? posColor : negColor;
 
           return (
             <div
@@ -349,66 +434,67 @@ export default function ForecastTab(props: ForecastTabProps) {
               onClick={() => props.onSelectedMonthChange?.(r.month)}
               style={{
                 borderRadius: 14,
-                border: `1.5px solid ${isSelected ? "rgba(99,132,199,0.55)" : "var(--border)"}`,
+                border: `1.5px solid ${isSelected ? "rgba(99,132,199,0.6)" : "var(--border)"}`,
                 background: isSelected ? "rgba(99,132,199,0.05)" : "var(--card)",
                 overflow: "hidden",
+                cursor: "pointer",
               }}
             >
-              {/* ── Card header: stats row ── */}
-              <div style={{ display: "flex", alignItems: "stretch" }}>
-
-                {/* Month label */}
-                <div style={{ minWidth: 76, padding: "14px 12px", display: "flex", alignItems: "center", borderRight: "1px solid var(--border)", flexShrink: 0 }}>
-                  <div style={{ fontWeight: 800, fontSize: 13, lineHeight: 1.2 }}>{monthLabel(r.month)}</div>
+              {/* Stats */}
+              <div className="fc-stats">
+                {/* Month name */}
+                <div className="fc-month">
+                  <div style={{ fontWeight: 800, fontSize: 16, lineHeight: 1.2 }}>{monthLabel(r.month)}</div>
                 </div>
 
-                {/* Income / Fixed / Disc — equal width columns */}
-                {[
-                  { label: "Income", val: r.incomeTotal, color: "inherit" },
-                  { label: "Fixed",  val: r.fixedTotal,  color: "inherit" },
-                  { label: "Disc",   val: r.discTotal,   color: "inherit" },
-                ].map(({ label, val, color }) => (
-                  <div key={label} style={{ flex: "1 1 0", padding: "10px 12px", borderRight: "1px solid var(--border)", minWidth: 0 }}>
-                    <div style={CAP}>{label}</div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{fmtMoney0(val)}</div>
-                  </div>
-                ))}
-
-                {/* Big month overflow */}
-                <div style={{
-                  flex: "1.4 1 0", padding: "10px 14px", borderRight: "1px solid var(--border)", minWidth: 0,
-                  background: r.monthOverflow >= 0 ? "rgba(22,101,52,0.05)" : "rgba(220,38,38,0.05)"
-                }}>
-                  <div style={CAP}>Month overflow</div>
-                  <div style={{ fontWeight: 900, fontSize: 20, color: ovColor, lineHeight: 1.1, whiteSpace: "nowrap" }}>{fmtMoney0(r.monthOverflow)}</div>
+                {/* Income */}
+                <div className="fc-cell">
+                  <div style={CAP}>Income</div>
+                  <div style={{ fontWeight: 700, fontSize: 18 }}>{fmtMoney0(r.incomeTotal)}</div>
                 </div>
 
-                {/* Running totals stacked */}
-                <div style={{ flex: "1.2 1 0", padding: "10px 12px", minWidth: 0 }}>
-                  <div style={{ marginBottom: 6 }}>
-                    <div style={CAP}>Running overflow</div>
-                    <div style={{ fontWeight: 800, fontSize: 14, color: runColor, whiteSpace: "nowrap" }}>{fmtMoney0(r.endOverflow)}</div>
+                {/* Fixed */}
+                <div className="fc-cell">
+                  <div style={CAP}>Fixed</div>
+                  <div style={{ fontWeight: 700, fontSize: 18 }}>{fmtMoney0(r.fixedTotal)}</div>
+                </div>
+
+                {/* Disc */}
+                <div className="fc-cell">
+                  <div style={CAP}>Disc</div>
+                  <div style={{ fontWeight: 700, fontSize: 18 }}>{fmtMoney0(r.discTotal)}</div>
+                </div>
+
+                {/* Month overflow */}
+                <div className="fc-cell fc-cell-overflow"
+                  style={{ background: r.monthOverflow >= 0 ? "rgba(22,101,52,0.06)" : "rgba(220,38,38,0.06)" }}>
+                  <div style={CAP}>Month Overflow</div>
+                  <div style={{ fontWeight: 900, fontSize: 26, color: ovColor, lineHeight: 1 }}>{fmtMoney0(r.monthOverflow)}</div>
+                </div>
+
+                {/* Running totals */}
+                <div className="fc-cell fc-cell-running">
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={CAP}>Running Overflow</div>
+                    <div style={{ fontWeight: 800, fontSize: 18, color: runColor }}>{fmtMoney0(r.endOverflow)}</div>
                   </div>
                   <div>
                     <div style={CAP}>Running HYS</div>
-                    <div style={{ fontWeight: 700, fontSize: 14, whiteSpace: "nowrap" }}>{fmtMoney0(r.endHys)}</div>
+                    <div style={{ fontWeight: 700, fontSize: 18 }}>{fmtMoney0(r.endHys)}</div>
                   </div>
                 </div>
               </div>
 
-              {/* ── Inputs row ── */}
-              <div
-                style={{ display: "grid", gridTemplateColumns: "76px 1fr 1fr 1fr 1fr", gap: 8, padding: "10px 12px", borderTop: "1px solid var(--border)", alignItems: "end" }}
-                onClick={e => e.stopPropagation()}
-              >
-                <div style={{ fontSize: 10, opacity: 0.3, paddingBottom: 4, fontWeight: 600 }}>Adjust</div>
+              {/* Adjust inputs */}
+              <div className="fc-adjust" onClick={e => e.stopPropagation()}>
+                <div className="fc-adjust-lbl">Adjust</div>
                 {([
                   { field: "incomeAdd"   as keyof MonthInputs, label: "Income ±" },
                   { field: "addFixed"    as keyof MonthInputs, label: "Fixed +"  },
                   { field: "addDisc"     as keyof MonthInputs, label: "Disc +"   },
                   { field: "hysTransfer" as keyof MonthInputs, label: "HYS"      },
                 ] as const).map(({ field, label }) => (
-                  <div key={field}>
+                  <div key={field} className="fc-adjust-field">
                     <div style={CAP}>{label}</div>
                     <input
                       value={getDraft(r.mKey, field, inp[field])}
@@ -425,7 +511,7 @@ export default function ForecastTab(props: ForecastTabProps) {
         })}
       </div>
 
-      <div style={{ marginTop: 16, opacity: 0.3, fontSize: 10 }}>
+      <div style={{ marginTop: 16, opacity: 0.25, fontSize: 11 }}>
         Sheet rows — Income {sheetMap.incomeRow ?? "?"} · Fixed {sheetMap.fixedRow ?? "?"} · Disc {sheetMap.discRow ?? "?"} · HYS {sheetMap.hysRow ?? "?"}
       </div>
     </div>
