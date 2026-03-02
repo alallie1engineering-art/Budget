@@ -1,6 +1,6 @@
 // src/lib/dates.ts
 export function monthKey(d: Date) {
-  return `${d.getFullYear()}-${d.getMonth()}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 export function monthLabel(d: Date) {
