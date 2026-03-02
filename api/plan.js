@@ -95,7 +95,7 @@ module.exports = async function handler(req, res) {
     const auth = getAuth();
     const sheets = google.sheets({ version: "v4", auth });
 
-    const range = `${sheetName}!A:Z`;
+    const range = `${sheetName}!A:ZZ`;
     const resp = await sheets.spreadsheets.values.get({ spreadsheetId, range, valueRenderOption: "UNFORMATTED_VALUE" });
     const values = (resp && resp.data && resp.data.values) || [];
 
